@@ -31,8 +31,8 @@ training images to real photos, and how do we win it back?
 Requires Python 3.10+ and Git.
 
 ```bash
-git clone https://github.com/<org>/lego-recognition.git
-cd lego-recognition
+git clone https://github.com/BluePineappleCake/lego-recognition-fhdo.git
+cd lego-recognition-fhdo
 python -m venv .venv
 .venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
 pip install -e ".[dev]"
