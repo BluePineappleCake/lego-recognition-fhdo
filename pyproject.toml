@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "legorec"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["numpy", "pandas", "opencv-python", "pyyaml"]
+
+[project.optional-dependencies]
+train = ["torch", "torchvision", "timm"]
+app = ["streamlit"]
+dev = ["pytest", "ruff", "nbstripout", "pre-commit"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
