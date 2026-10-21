@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project data and models
+data/raw/
+data/processed/
+models/
+wandb/
+*.pt
+*.pth
