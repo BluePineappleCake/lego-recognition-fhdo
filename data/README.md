@@ -80,6 +80,12 @@ Download from https://rebrickable.com/downloads/ into `data/raw/rebrickable/`:
 
 ## Splits
 
+`data/splits/renders.csv` assigns every render **pose** to `train`, `val` or
+`test` (80 / 10 / 10 %, stratified per part). Each pose exists twice (cameras
+L and R); both views always share a split, otherwise near-copies of training
+images end up in the test set. Never regenerate this file: all render results
+are only comparable on the same split.
+
 `data/splits/finetune.csv` and `data/splits/test.csv` list photo paths.
 
 - Splits are made **by session**, never by single photo. Photos from the
@@ -90,10 +96,16 @@ Download from https://rebrickable.com/downloads/ into `data/raw/rebrickable/`:
 ## Paths in code
 
 Code reads the data location from the environment variable
-`LEGOREC_DATA`, defaulting to `data/`. On Kaggle set it to the input folder:
+`LEGOREC_DATA`, defaulting to `data/` (see `src/legorec/paths.py`).
+Caches go to `LEGOREC_PROCESSED`, defaulting to `$LEGOREC_DATA/processed`.
+On Kaggle the input folder is read-only, so set both:
 
 ```python
 import os
 
 os.environ["LEGOREC_DATA"] = "/kaggle/input"
+os.environ["LEGOREC_PROCESSED"] = "/kaggle/working/processed"
 ```
+
+The render folder on Kaggle does not follow our layout; pass it directly:
+`--data /kaggle/input/datasets/joosthazelzet/lego-brick-images/dataset`.
