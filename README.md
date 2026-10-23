@@ -26,6 +26,16 @@ Photo → Find bricks → Shape (CNN) + Colour → Inventory → "What can I bui
 **Core experiment:** how much accuracy do we lose going from rendered
 training images to real photos, and how do we win it back?
 
+## Links
+
+| What | Where | Access |
+|---|---|---|
+| Experiment tracking | [W&B project `lego-fhdo/lego-recognition`](https://forge.coreweave.com/wandb/lego-fhdo/lego-recognition) | team members – ask for an invite to the W&B team `lego-fhdo` |
+| Training data (renders) | [Kaggle: Images of LEGO Bricks](https://www.kaggle.com/datasets/joosthazelzet/lego-brick-images) | public |
+| Our photos | private Kaggle dataset (link follows) | team members |
+| Part and set lists | [Rebrickable downloads](https://rebrickable.com/downloads/) | public |
+| Experiment log | [`docs/experiments.md`](docs/experiments.md) | – |
+
 ## Setup
 
 Requires Python 3.10+ and Git.
