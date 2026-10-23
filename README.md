@@ -90,34 +90,6 @@ Results and conclusions so far: [`docs/experiments.md`](docs/experiments.md).
 Rules: one change per experiment, compare over several seeds, never tune on
 the real-photo test set.
 
-### On Kaggle (no local GPU needed)
-
-1. *Create → New Notebook*, then in the right panel: *+ Add Input* →
-   "Images of LEGO Bricks" (joosthazelzet); *Settings* → Accelerator **GPU**,
-   Internet **on** (needs a phone-verified Kaggle account)
-2. *Add-ons → Secrets*: add `WANDB_API_KEY` (your key from
-   [wandb.ai/authorize](https://wandb.ai/authorize)) and tick it for this notebook
-3. Run:
-
-```python
-import os
-from kaggle_secrets import UserSecretsClient
-
-os.environ["WANDB_API_KEY"] = UserSecretsClient().get_secret("WANDB_API_KEY")
-os.environ["WANDB_ENTITY"] = "lego-fhdo"
-os.environ["LEGOREC_PROCESSED"] = "/kaggle/working/processed"  # /kaggle/input is read-only
-
-!git clone https://github.com/BluePineappleCake/lego-recognition-fhdo.git
-%cd lego-recognition-fhdo
-!pip install -q -e ".[train]"   # torch is preinstalled and stays as is
-!python scripts/train_shape.py --config configs/shape_baseline.yaml \
-    --data /kaggle/input/datasets/joosthazelzet/lego-brick-images/dataset
-```
-
-The dataset folder also contains an older version ("LEGO brick images v1");
-always point `--data` at `.../dataset`. For full training runs use
-*Save Version → Save & Run All*, interactive sessions stop when idle.
-
 ## Repository structure
 
 ```

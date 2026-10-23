@@ -1,0 +1,9 @@
+# Same as the baseline, plus the measured brick size as an extra input.
+# Motivation: ~half of the baseline errors were the same part in a different
+# length (see docs/experiments.md).
+size: 96
+width: 32
+size_feature: true
+size_noise: 0.05
+epochs: 30
+tags: [renders-only]
