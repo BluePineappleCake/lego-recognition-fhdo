@@ -18,7 +18,7 @@ Photo → Find bricks → Shape (CNN) + Colour → Inventory → "What can I bui
 |---|---|---|
 | Capture | Fixed camera, even light, grey card in every photo | planned |
 | Find bricks | OpenCV contours for separated bricks; YOLO-seg for piles (stretch goal) | planned |
-| Shape | CNN on greyscale cut-outs, trained on renders, fine-tuned on real photos | planned |
+| Shape | CNN on greyscale cut-outs, trained on renders, fine-tuned on real photos | v0: 94.8 % top-1 on renders, real photos pending |
 | Colour | White balance via grey card, nearest measured LEGO colour | planned |
 | Inventory | Part, colour, count + confidence | planned |
 | Sets | Coverage and missing parts per set, using Rebrickable part lists | planned |
@@ -39,8 +39,14 @@ pip install -e ".[dev]"
 pre-commit install
 ```
 
-Optional extras: `.[train]` for PyTorch/timm (preinstalled on Kaggle),
+Optional extras: `.[train]` for PyTorch/timm/W&B (preinstalled on Kaggle),
 `.[app]` for the Streamlit app.
+
+> **Training locally with an NVIDIA GPU:** install PyTorch with CUDA **before**
+> `pip install -e ".[dev,train]"`, using the command from
+> [pytorch.org](https://pytorch.org) (Get Started). `pip install torch` from PyPI
+> is CPU-only on Windows. Check with
+> `python -c "import torch; print(torch.cuda.is_available())"`.
 
 ## Data
 
@@ -54,6 +60,26 @@ Data is **not** stored in this repository.
 
 See `data/README.md` for where to put files locally.
 
+## Training the shape classifier
+
+```bash
+wandb login                                   # once; runs go to the team "lego-fhdo"
+set WANDB_ENTITY=lego-fhdo                    # PowerShell: $env:WANDB_ENTITY="lego-fhdo"
+
+python scripts/train_shape.py --config configs/shape_baseline.yaml --sanity   # loss -> ~0
+python scripts/train_shape.py --config configs/shape_baseline.yaml
+python scripts/train_shape.py --config configs/shape_size_feature.yaml --seed 1
+```
+
+Renders are read from `data/raw/renders/dataset/` (or `--data <folder>`, the
+folder that directly contains the 40,000 PNGs). The first run preprocesses
+everything once into `data/processed/`. Checkpoints go to `models/` and to W&B.
+
+Results and conclusions so far: [`docs/experiments.md`](docs/experiments.md).
+
+Rules: one change per experiment, compare over several seeds, never tune on
+the real-photo test set.
+
 ## Repository structure
 
 ```
@@ -64,6 +90,7 @@ notebooks/       exploration only, named NN_initials_topic.ipynb
 scripts/         training and evaluation entry points
 app/             Streamlit app
 tests/
+docs/            experiment log and progress presentations
 ```
 
 ## Team

@@ -1,0 +1,7 @@
+# Baseline shape classifier: small CNN from scratch, greyscale 96 x 96 crops.
+# Values not set here come from DEFAULTS in scripts/train_shape.py.
+size: 96
+width: 32
+size_feature: false
+epochs: 30
+tags: [renders-only, baseline]

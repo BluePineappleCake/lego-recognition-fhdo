@@ -6,12 +6,16 @@ build-backend = "setuptools.build_meta"
 name = "legorec"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["numpy", "pandas", "opencv-python", "pyyaml"]
+dependencies = ["numpy", "pandas", "opencv-python", "pyyaml", "pillow"]
 
 [project.optional-dependencies]
-train = ["torch", "torchvision", "timm"]
+# torch: install the CUDA build from pytorch.org FIRST (PyPI gives CPU-only on Windows)
+train = ["torch", "torchvision", "timm", "wandb"]
 app = ["streamlit"]
 dev = ["pytest", "ruff", "nbstripout", "pre-commit"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
