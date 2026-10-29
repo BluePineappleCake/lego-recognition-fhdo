@@ -26,6 +26,7 @@ from legorec.paths import MODELS_DIR, processed_dir, renders_dir
 from legorec.shape.augment import augment_batch, denormalize
 from legorec.shape.loaders import Batches
 from legorec.shape.model import SizeNorm, SmallCNN
+from legorec.shape.preprocess import PREPROCESS_VERSION
 
 # values a config file does not set
 DEFAULTS = {
@@ -73,7 +74,8 @@ def load_data(cfg, data_dir):
 
     raw = {}
     for s in ("train", "val", "test"):
-        cache = processed_dir() / f"renders_{s}_{cfg['size']}_{split_hash}.npz"
+        name = f"renders_{s}_{cfg['size']}_{PREPROCESS_VERSION}_{split_hash}.npz"
+        cache = processed_dir() / name
         x, px = build_cache(split[s], cfg["size"], cache)
         y = [part_to_idx[it.part] for it in split[s]]
         raw[s] = (x, px, y)
@@ -132,7 +134,9 @@ def main():
     tags = list(cfg["tags"]) + (["size-feature"] if cfg["size_feature"] else [])
     run = wandb.init(
         project=cfg["project"],
-        config=cfg | {"split_hash": split_hash, "n_classes": len(parts)},
+        config=cfg
+        | {"split_hash": split_hash, "n_classes": len(parts)}
+        | {"preprocess": PREPROCESS_VERSION},
         tags=tags,
         job_type="sanity" if args.sanity else "train",
     )

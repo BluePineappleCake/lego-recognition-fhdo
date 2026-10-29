@@ -10,10 +10,15 @@ bounding box) measured BEFORE the resize, because the resize removes the
 absolute size (1x3 and 1x4 bricks then look alike). See docs/experiments.md.
 """
 
+import cv2
 import numpy as np
 from PIL import Image
 
 from legorec.types import BrickCrop
+
+# Bump this whenever the output of the preprocessing changes: it is part of the
+# cache file names, so old caches are not silently reused.
+PREPROCESS_VERSION = "mask2"
 
 DEFAULT_SIZE = 96
 DEFAULT_MARGIN = 0.08
@@ -28,6 +33,41 @@ def _to_grey(img) -> np.ndarray:
     return a.astype(np.int16)
 
 
+def _to_rgb(img) -> np.ndarray:
+    if isinstance(img, Image.Image):
+        return np.asarray(img.convert("RGB"))
+    a = np.asarray(img)
+    if a.ndim == 2:  # grey -> 3 identical channels
+        a = np.repeat(a[..., None], 3, 2)
+    return a[..., :3].astype(np.uint8)
+
+
+def brick_mask(rgb: np.ndarray, thr: float = 12.0) -> np.ndarray:
+    """RGB image (H, W, 3) -> bool mask of the single largest object.
+
+    1. Colour distance (Lab) to the background colour instead of grey values:
+       a white brick on blue card is easy to separate in colour, not in grey.
+    2. Closing fills holes and gaps from highlights and bright edges.
+    3. Only the largest connected region counts: stripes, crumbs and dust at
+       the edge are dropped.
+    Returns an all-False mask if nothing stands out from the background.
+    """
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    border = np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])
+    bg = np.median(border, axis=0)  # background colour
+    dist = np.linalg.norm(lab - bg, axis=2)  # colour distance per pixel
+    mask = (dist > thr).astype(np.uint8)
+    k = max(3, int(0.02 * max(mask.shape))) | 1  # ~2 % of the image, odd so
+    # the kernel is centred (an even size shifts the mask by one pixel)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
+    if n <= 1:  # label 0 is the background, nothing else found
+        return np.zeros(mask.shape, bool)
+    largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    return labels == largest
+
+
 def _square_crop(g, y0, y1, x0, x1, bg, size, margin) -> np.ndarray:
     side = int(max(y1 - y0, x1 - x0) * (1 + 2 * margin)) + 1
     cy, cx = (y0 + y1) // 2, (x0 + x1) // 2
@@ -40,21 +80,22 @@ def _square_crop(g, y0, y1, x0, x1, bg, size, margin) -> np.ndarray:
     return np.asarray(out.resize((size, size), Image.BILINEAR))
 
 
-def preprocess_image(img, size=DEFAULT_SIZE, margin=DEFAULT_MARGIN, thr=20):
+def preprocess_image(img, size=DEFAULT_SIZE, margin=DEFAULT_MARGIN, thr=12.0):
     """One brick on a plain background (renders, single-brick photos).
 
-    The background value is estimated from the image border; every pixel that
-    differs by more than `thr` counts as brick.
+    The brick is the largest region whose colour differs from the background
+    by more than `thr` (see brick_mask).
 
     Returns (uint8 array size x size, brick size in px).
     """
     g = _to_grey(img)
-    border = np.concatenate([g[0], g[-1], g[:, 0], g[:, -1]])
-    bg = int(np.median(border))
-    ys, xs = np.nonzero(np.abs(g - bg) > thr)
-    if not len(xs):  # nothing found: use the whole image
+    mask = brick_mask(_to_rgb(img), thr)
+    if not mask.any():  # nothing found: use the whole image
         out = Image.fromarray(np.clip(g, 0, 255).astype(np.uint8))
         return np.asarray(out.resize((size, size), Image.BILINEAR)), float(max(g.shape))
+    border = np.concatenate([g[0], g[-1], g[:, 0], g[:, -1]])
+    bg = int(np.median(border))
+    ys, xs = np.nonzero(mask)
     y0, y1, x0, x1 = ys.min(), ys.max(), xs.min(), xs.max()
     px = float(max(y1 - y0, x1 - x0) + 1)
     return _square_crop(g, y0, y1, x0, x1, bg, size, margin), px

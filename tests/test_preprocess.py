@@ -1,7 +1,7 @@
 import numpy as np
 from PIL import Image
 
-from legorec.shape.preprocess import preprocess_crop, preprocess_image
+from legorec.shape.preprocess import brick_mask, preprocess_crop, preprocess_image
 from legorec.types import BrickCrop
 
 
@@ -43,3 +43,49 @@ def test_crop_ignores_clutter_outside_the_mask():
     rgb = np.repeat(noisy[..., None], 3, 2)
     _, px = preprocess_crop(BrickCrop(image=rgb, mask=a < 128, bbox=(0, 0, 400, 400)))
     assert px == 120
+
+
+# --- robust mask (brick_mask) ---------------------------------------------
+
+
+def test_mask_keeps_exact_bounding_box():
+    a = _rect_image()
+    ys, xs = np.nonzero(brick_mask(np.repeat(a[..., None], 3, 2)))
+    assert (ys.min(), ys.max(), xs.min(), xs.max()) == (180, 219, 140, 259)
+
+
+def test_dark_stripe_at_the_edge_is_ignored():
+    # the WhatsApp case: a thin dark line along the bottom edge
+    a = _rect_image()
+    a[-3:, :] = 30
+    _, px = preprocess_image(a)
+    assert px == 120
+
+
+def test_small_speck_is_ignored():
+    a = _rect_image()
+    a[20:26, 20:26] = 40
+    _, px = preprocess_image(a)
+    assert px == 120
+
+
+def test_highlights_inside_the_brick_do_not_split_it():
+    a = _rect_image()
+    a[195:205, 150:250:20] = 200  # bright spots with background colour
+    a[180:220, 199:201] = 200  # a bright line that cuts the brick in two
+    _, px = preprocess_image(a)
+    assert px == 120
+
+
+def test_white_brick_on_blue_background():
+    rgb = np.zeros((400, 400, 3), np.uint8)
+    rgb[:] = (40, 90, 200)  # blue card
+    rgb[180:220, 140:260] = (235, 235, 235)  # white brick
+    _, px = preprocess_image(rgb)
+    assert px == 120
+
+
+def test_empty_image_falls_back_to_whole_image():
+    a = np.full((300, 200), 128, np.uint8)
+    x, px = preprocess_image(a)
+    assert x.shape == (96, 96) and px == 300
