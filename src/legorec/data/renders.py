@@ -108,13 +108,15 @@ def load_or_create_split(items, path=SPLIT_FILE):
     return dict(out), split_hash(assign)
 
 
-def build_cache(items, size, cache_file):
+def build_cache(items, size, cache_file, contrast="none"):
     """Preprocess once and keep images (uint8) + brick sizes (px) on disk."""
     cache_file = Path(cache_file)
     if cache_file.exists():
         c = np.load(cache_file)
         return c["x"], c["px"]
-    res = [preprocess_image(Image.open(it.path), size) for it in items]
+    res = [
+        preprocess_image(Image.open(it.path), size, contrast=contrast) for it in items
+    ]
     x = np.stack([r[0] for r in res])
     px = np.array([r[1] for r in res], np.float32)
     cache_file.parent.mkdir(parents=True, exist_ok=True)

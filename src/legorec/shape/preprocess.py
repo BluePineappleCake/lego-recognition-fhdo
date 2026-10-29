@@ -68,6 +68,41 @@ def brick_mask(rgb: np.ndarray, thr: float = 12.0) -> np.ndarray:
     return labels == largest
 
 
+CONTRAST_MODES = ("none", "stretch")
+STRETCH_BG = 128  # background grey value in "stretch" mode
+
+
+def _apply_contrast(g, mask, bg, contrast):
+    """contrast="stretch": spread the grey values INSIDE the brick mask over the
+    full range 0..255 (2nd and 98th percentile -> 0 and 255), so a red brick is
+    no longer almost black and a yellow one no longer almost white. Pixels
+    outside the (slightly shrunk) mask become one fixed background value,
+    otherwise the background would be stretched too and look different in
+    every photo. The measured brick size is not affected.
+
+    Returns (grey image, background value for padding).
+    """
+    if contrast not in CONTRAST_MODES:
+        raise ValueError(f"contrast must be one of {CONTRAST_MODES}, not {contrast!r}")
+    if contrast == "none":
+        return g, bg
+    # Shrink the mask a little: the brick edge is a light seam (anti-aliasing,
+    # JPEG). Left inside, it would set the 98th percentile and turn into a
+    # white outline that renders never have.
+    ys, xs = np.nonzero(mask)
+    size = max(ys.max() - ys.min(), xs.max() - xs.min()) + 1
+    k = max(3, int(0.03 * size)) | 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    inner = cv2.erode(mask.astype(np.uint8), kernel).astype(bool)
+    if not inner.any():  # tiny brick: keep the full mask
+        inner = mask
+    lo, hi = np.percentile(g[inner], [2, 98])
+    if hi - lo >= 1:  # a completely flat brick has nothing to stretch
+        g = (g.astype(np.float32) - lo) * (255.0 / (hi - lo))
+    g = np.clip(np.where(inner, g, STRETCH_BG), 0, 255).astype(np.int16)
+    return g, STRETCH_BG
+
+
 def _square_crop(g, y0, y1, x0, x1, bg, size, margin) -> np.ndarray:
     side = int(max(y1 - y0, x1 - x0) * (1 + 2 * margin)) + 1
     cy, cx = (y0 + y1) // 2, (x0 + x1) // 2
@@ -80,11 +115,13 @@ def _square_crop(g, y0, y1, x0, x1, bg, size, margin) -> np.ndarray:
     return np.asarray(out.resize((size, size), Image.BILINEAR))
 
 
-def preprocess_image(img, size=DEFAULT_SIZE, margin=DEFAULT_MARGIN, thr=12.0):
+def preprocess_image(
+    img, size=DEFAULT_SIZE, margin=DEFAULT_MARGIN, thr=12.0, contrast="none"
+):
     """One brick on a plain background (renders, single-brick photos).
 
     The brick is the largest region whose colour differs from the background
-    by more than `thr` (see brick_mask).
+    by more than `thr` (see brick_mask). `contrast`: see _apply_contrast.
 
     Returns (uint8 array size x size, brick size in px).
     """
@@ -95,13 +132,16 @@ def preprocess_image(img, size=DEFAULT_SIZE, margin=DEFAULT_MARGIN, thr=12.0):
         return np.asarray(out.resize((size, size), Image.BILINEAR)), float(max(g.shape))
     border = np.concatenate([g[0], g[-1], g[:, 0], g[:, -1]])
     bg = int(np.median(border))
+    g, bg = _apply_contrast(g, mask, bg, contrast)
     ys, xs = np.nonzero(mask)
     y0, y1, x0, x1 = ys.min(), ys.max(), xs.min(), xs.max()
     px = float(max(y1 - y0, x1 - x0) + 1)
     return _square_crop(g, y0, y1, x0, x1, bg, size, margin), px
 
 
-def preprocess_crop(crop: BrickCrop, size=DEFAULT_SIZE, margin=DEFAULT_MARGIN):
+def preprocess_crop(
+    crop: BrickCrop, size=DEFAULT_SIZE, margin=DEFAULT_MARGIN, contrast="none"
+):
     """A brick cut out by the segmentation step.
 
     Uses the segmentation mask instead of a background threshold. Pixels outside
@@ -112,9 +152,10 @@ def preprocess_crop(crop: BrickCrop, size=DEFAULT_SIZE, margin=DEFAULT_MARGIN):
     g = _to_grey(crop.image)
     mask = np.asarray(crop.mask, bool)
     if not mask.any():
-        return preprocess_image(crop.image, size, margin)
+        return preprocess_image(crop.image, size, margin, contrast=contrast)
     bg = int(np.median(g[~mask])) if (~mask).any() else 255
     g = np.where(mask, g, bg)
+    g, bg = _apply_contrast(g, mask, bg, contrast)
     ys, xs = np.nonzero(mask)
     y0, y1, x0, x1 = ys.min(), ys.max(), xs.min(), xs.max()
     px = float(max(y1 - y0, x1 - x0) + 1)

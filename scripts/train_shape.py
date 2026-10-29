@@ -34,6 +34,7 @@ DEFAULTS = {
     "width": 32,  # channels of the first conv block
     "dropout": 0.3,
     "size_feature": False,  # give the network the measured brick size
+    "contrast": "none",  # "stretch": equalise contrast per crop (see preprocess)
     "size_noise": 0.05,  # ~5 % noise on that size during training
     "epochs": 30,
     "batch_size": 128,
@@ -74,9 +75,11 @@ def load_data(cfg, data_dir):
 
     raw = {}
     for s in ("train", "val", "test"):
-        name = f"renders_{s}_{cfg['size']}_{PREPROCESS_VERSION}_{split_hash}.npz"
-        cache = processed_dir() / name
-        x, px = build_cache(split[s], cfg["size"], cache)
+        # every setting that changes the preprocessed images is in the file
+        # name, otherwise an old cache would be reused silently
+        tag = f"{cfg['size']}_{PREPROCESS_VERSION}_{cfg['contrast']}_{split_hash}"
+        cache = processed_dir() / f"renders_{s}_{tag}.npz"
+        x, px = build_cache(split[s], cfg["size"], cache, cfg["contrast"])
         y = [part_to_idx[it.part] for it in split[s]]
         raw[s] = (x, px, y)
         print(f"[data] {s}: {len(y)} images")

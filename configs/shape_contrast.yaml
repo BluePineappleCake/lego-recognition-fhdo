@@ -1,0 +1,10 @@
+# Same as the baseline, but grey values are stretched per crop (2nd..98th
+# percentile inside the brick mask -> 0..255) and the background is set to one
+# fixed grey. Idea: in greyscale a red brick is almost black and a yellow one
+# almost white, while all renders are mid-grey. Compare on real photos.
+size: 96
+width: 32
+size_feature: false
+contrast: stretch
+epochs: 30
+tags: [renders-only, contrast]

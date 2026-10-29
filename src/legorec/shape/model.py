@@ -95,6 +95,7 @@ class ShapeClassifier:
         self.parts, self.size = ck["parts"], cfg["size"]
         self.names = ck.get("names", {})
         self.size_feature = bool(cfg.get("size_feature", False))
+        self.contrast = cfg.get("contrast", "none")  # same as in training
         norm = ck.get("size_norm", {"mu": 0.0, "sd": 1.0})  # older checkpoints
         self.size_norm = SizeNorm(**norm)
         self.model = SmallCNN(
@@ -122,7 +123,7 @@ class ShapeClassifier:
 
     def predict(self, crops: list[BrickCrop]) -> list[tuple[str, float]]:
         """Segmentation crops -> [(part_id, confidence)], e.g. [("3001", 0.93)]."""
-        res = [preprocess_crop(c, self.size) for c in crops]
+        res = [preprocess_crop(c, self.size, contrast=self.contrast) for c in crops]
         top = self._topk([r[0] for r in res], [r[1] for r in res], 1)
         return [t[0] for t in top]
 
@@ -131,6 +132,8 @@ class ShapeClassifier:
 
         -> (top-k [(part_id, confidence)] per image, model inputs, sizes in px)
         """
-        res = [preprocess_image(img, self.size) for img in images]
+        res = [
+            preprocess_image(img, self.size, contrast=self.contrast) for img in images
+        ]
         arrays, pxs = [r[0] for r in res], [r[1] for r in res]
         return self._topk(arrays, pxs, k), arrays, pxs
