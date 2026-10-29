@@ -12,7 +12,7 @@ import torch
 from torch import nn
 
 from legorec.shape.augment import normalize
-from legorec.shape.preprocess import preprocess_crop
+from legorec.shape.preprocess import preprocess_crop, preprocess_image
 from legorec.types import BrickCrop
 
 
@@ -73,35 +73,55 @@ class SizeNorm:
 
 
 class ShapeClassifier:
-    """Trained model + everything needed to use it on new crops.
+    """Trained model + everything needed to use it on new images.
 
     real_scale converts sizes in photo pixels to render pixels:
-    real_scale = (render px per mm) / (photo px per mm). Only used with size_feature.
+    real_scale = (render px per mm) / (photo px per mm). Only needed for models
+    trained with size_feature. See scripts/predict_shape.py for a rough calibration.
     """
 
     def __init__(self, checkpoint, device="cpu", real_scale=None):
         ck = torch.load(checkpoint, map_location=device, weights_only=False)
         cfg = ck["cfg"]
         self.parts, self.size = ck["parts"], cfg["size"]
-        self.size_norm = SizeNorm(**ck["size_norm"])
+        self.names = ck.get("names", {})
+        self.size_feature = bool(cfg.get("size_feature", False))
+        norm = ck.get("size_norm", {"mu": 0.0, "sd": 1.0})  # older checkpoints
+        self.size_norm = SizeNorm(**norm)
         self.model = SmallCNN(
-            len(self.parts), cfg["width"], cfg["dropout"], cfg["size_feature"]
+            len(self.parts), cfg["width"], cfg["dropout"], self.size_feature
         )
         self.model.load_state_dict(ck["model"])
         self.model.to(device).eval()
         self.device = device
-        if cfg["size_feature"] and real_scale is None:
+        if self.size_feature and real_scale is None:
             raise ValueError(
                 "this model uses the brick size: pass real_scale (see docstring)"
             )
         self.real_scale = real_scale or 1.0
 
     @torch.no_grad()
-    def predict(self, crops: list[BrickCrop]) -> list[tuple[str, float]]:
-        """-> [(part_id, confidence)] per crop, e.g. [("3001", 0.93)]."""
-        res = [preprocess_crop(c, self.size) for c in crops]
-        x = normalize(torch.from_numpy(np.stack([r[0] for r in res])).unsqueeze(1))
-        z = torch.from_numpy(self.size_norm([r[1] * self.real_scale for r in res]))
+    def _topk(self, arrays, pxs, k):
+        x = normalize(torch.from_numpy(np.stack(arrays)).unsqueeze(1))
+        z = torch.from_numpy(self.size_norm([p * self.real_scale for p in pxs]))
         p = self.model(x.to(self.device), z.to(self.device)).softmax(1).cpu()
-        conf, idx = p.max(1)
-        return [(self.parts[i], float(c)) for i, c in zip(idx.tolist(), conf.tolist())]
+        conf, idx = p.topk(min(k, p.shape[1]), 1)
+        return [
+            [(self.parts[i], float(c)) for i, c in zip(ii, cc)]
+            for ii, cc in zip(idx.tolist(), conf.tolist())
+        ]
+
+    def predict(self, crops: list[BrickCrop]) -> list[tuple[str, float]]:
+        """Segmentation crops -> [(part_id, confidence)], e.g. [("3001", 0.93)]."""
+        res = [preprocess_crop(c, self.size) for c in crops]
+        top = self._topk([r[0] for r in res], [r[1] for r in res], 1)
+        return [t[0] for t in top]
+
+    def predict_images(self, images, k=3):
+        """Photos with ONE brick on a plain background.
+
+        -> (top-k [(part_id, confidence)] per image, model inputs, sizes in px)
+        """
+        res = [preprocess_image(img, self.size) for img in images]
+        arrays, pxs = [r[0] for r in res], [r[1] for r in res]
+        return self._topk(arrays, pxs, k), arrays, pxs

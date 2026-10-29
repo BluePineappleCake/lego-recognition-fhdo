@@ -37,3 +37,32 @@ def test_metrics_and_error_breakdown():
     m = classification_metrics(logits, y)
     assert m["top1"] == 0.5
     assert error_breakdown(y, pred, parts) == {"errors_length": 1, "errors_other": 1}
+
+
+def test_shape_classifier_roundtrip(tmp_path):
+    from PIL import Image
+
+    from legorec.shape.model import ShapeClassifier
+
+    parts = ["3001", "3002", "3003"]
+    model = SmallCNN(len(parts), width=8, size_feature=True)
+    ck = tmp_path / "m.pt"
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "parts": parts,
+            "names": {p: f"brick {p}" for p in parts},
+            "cfg": {"size": 96, "width": 8, "dropout": 0.3, "size_feature": True},
+            "size_norm": {"mu": 5.0, "sd": 0.3},
+        },
+        ck,
+    )
+    with pytest.raises(ValueError):
+        ShapeClassifier(ck)  # size model without real_scale
+    clf = ShapeClassifier(ck, real_scale=0.5)
+    img = np.full((300, 300), 200, np.uint8)
+    img[100:200, 120:180] = 60
+    top, arrays, pxs = clf.predict_images([Image.fromarray(img)], k=3)
+    assert [p for p, _ in top[0]] and len(top[0]) == 3
+    assert abs(sum(c for _, c in top[0]) - 1) < 1e-5
+    assert arrays[0].shape == (96, 96) and pxs[0] == 100
