@@ -81,13 +81,6 @@ def load_split(path=SPLIT_FILE) -> dict[str, str]:
         return {row["group"]: row["split"] for row in csv.DictReader(f)}
 
 
-def convert_legacy_split(json_path, csv_path=SPLIT_FILE) -> None:
-    """One-off: convert the split.json of the first experiments to the CSV format."""
-    with open(json_path, encoding="utf-8") as f:
-        save_split(json.load(f), csv_path)
-    print(f"[split] wrote {csv_path}")
-
-
 def split_hash(assign: dict[str, str]) -> str:
     return hashlib.md5(json.dumps(assign, sort_keys=True).encode()).hexdigest()[:8]
 

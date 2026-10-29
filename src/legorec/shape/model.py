@@ -1,8 +1,17 @@
 """Shape classifier: small CNN trained from scratch (no pretrained weights).
 
-Optional size input: the brick size is fed in as z = standardised log(px).
-[z, z^2] is concatenated to the CNN features; a linear layer on (z, z^2) per
-class is a Gaussian log-likelihood of the brick's size for that class.
+Optional size input (size_feature=True)
+---------------------------------------
+Resizing every crop to 96 x 96 removes the absolute size, so a 1x3 and a 1x4
+brick look alike. We therefore also give the network the measured size:
+
+    z = (log(size in px) - mean) / std        (standardised on the training set)
+
+and append [z, z^2] to the CNN features before the last layer. Why z^2? The
+last layer computes for every class c a score  a_c * z + b_c * z^2 + ...
+A quadratic in z can describe "class c has a typical size and gets less likely
+the further z is away from it" (a bell curve in log space). With z alone the
+score could only grow or shrink with size, never peak at the right size.
 """
 
 from dataclasses import dataclass
@@ -48,7 +57,7 @@ class SmallCNN(nn.Module):
 
     def forward(self, x, z=None):
         f = self.features(x)
-        if self.size_feature:
+        if self.size_feature:  # append [z, z^2], see module docstring
             z = z.to(f.dtype)[:, None]
             f = torch.cat([f, z, z * z], 1)
         return self.fc(f)
