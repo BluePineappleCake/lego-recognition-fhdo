@@ -3,6 +3,8 @@
 LEGOREC_DATA       root of the (unversioned) data folder, default: <repo>/data
 LEGOREC_PROCESSED  writable folder for caches, default: $LEGOREC_DATA/processed
                    (on Kaggle /kaggle/input is read-only -> set it to /kaggle/working)
+LEGOREC_SHAPE_MODEL  checkpoint used by legorec.shape.predict,
+                   default: <repo>/models/shape.pt
 """
 
 import os
@@ -26,3 +28,8 @@ def renders_dir() -> Path:
 
 def processed_dir() -> Path:
     return Path(os.environ.get("LEGOREC_PROCESSED", data_dir() / "processed"))
+
+
+def shape_model_path() -> Path:
+    """Checkpoint of the shape classifier that the pipeline uses."""
+    return Path(os.environ.get("LEGOREC_SHAPE_MODEL", MODELS_DIR / "shape.pt"))
