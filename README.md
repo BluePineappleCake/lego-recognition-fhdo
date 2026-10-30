@@ -119,6 +119,19 @@ The dataset folder also contains an older version ("LEGO brick images v1");
 always point `--data` at `.../dataset`. For full training runs use
 *Save Version → Save & Run All*, interactive sessions stop when idle.
 
+## Using the shape model in code
+
+```python
+from legorec.shape.predict import predict
+
+part, confidence = predict(crop)  # crop: BrickCrop from segmentation -> ("3001", 0.93)
+```
+
+The model is read from `models/shape.pt`: copy the checkpoint the team agreed
+on there (from `models/` or the W&B artifact `shape-cnn`), or set
+`LEGOREC_SHAPE_MODEL`. Size-feature models need `load_model(path, real_scale=...)`
+first, see `src/legorec/shape/predict.py`.
+
 ## Repository structure
 
 ```
