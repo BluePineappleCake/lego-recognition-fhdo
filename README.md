@@ -79,6 +79,7 @@ set WANDB_ENTITY=lego-fhdo                    # PowerShell: $env:WANDB_ENTITY="l
 python scripts/train_shape.py --config configs/shape_baseline.yaml --sanity   # loss -> ~0
 python scripts/train_shape.py --config configs/shape_baseline.yaml
 python scripts/train_shape.py --config configs/shape_size_feature.yaml --seed 1
+python scripts/train_shape.py --config configs/shape_contrast.yaml      # contrast per crop
 ```
 
 Renders are read from `data/raw/renders/dataset/` (or `--data <folder>`, the

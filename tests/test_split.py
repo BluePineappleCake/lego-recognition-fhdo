@@ -1,5 +1,5 @@
 from legorec.data.renders import (
-    NAME_RE,
+    FILE_NAME_PATTERN,
     RenderImage,
     load_split,
     make_split,
@@ -20,10 +20,10 @@ def _items(parts=("3001", "3002"), poses=20):
 
 
 def test_name_pattern():
-    m = NAME_RE.match("14719 flat tile corner 2x2 000L")
-    assert m["cls"] == "14719 flat tile corner 2x2"
-    assert m["idx"] == "000"
-    assert m["view"] == "L"
+    m = FILE_NAME_PATTERN.match("14719 flat tile corner 2x2 000L")
+    assert m["name"] == "14719 flat tile corner 2x2"
+    assert m["pose"] == "000"
+    assert m["camera"] == "L"
 
 
 def test_both_views_of_a_pose_in_the_same_split():

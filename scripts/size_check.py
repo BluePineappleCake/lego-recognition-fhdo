@@ -17,17 +17,28 @@ from legorec.data.renders import index_renders
 from legorec.paths import renders_dir
 from legorec.shape.preprocess import preprocess_image
 
+# pairs of parts that differ only in length
 PARTS = {"3001", "3002", "3010", "3622", "3069", "3070"}
 
-ap = argparse.ArgumentParser()
-ap.add_argument("--data", default=None)
-a = ap.parse_args()
 
-sizes = defaultdict(list)
-for it in index_renders(a.data or renders_dir()):
-    if it.part in PARTS:
-        sizes[it.name].append(preprocess_image(Image.open(it.path))[1])
-for name, v in sorted(sizes.items()):
-    print(
-        f"{name:20s} median {np.median(v):6.1f} px   10-90 %: {np.percentile(v, [10, 90])}"
-    )
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data", default=None)
+    args = parser.parse_args()
+
+    sizes_per_part = defaultdict(list)
+    for image in index_renders(args.data or renders_dir()):
+        if image.part in PARTS:
+            _, brick_size = preprocess_image(Image.open(image.path))
+            sizes_per_part[image.name].append(brick_size)
+
+    for name, sizes in sorted(sizes_per_part.items()):
+        low, high = np.percentile(sizes, [10, 90])
+        print(
+            f"{name:20s} median {np.median(sizes):6.1f} px   "
+            f"10-90 %: {low:.0f} to {high:.0f} px"
+        )
+
+
+if __name__ == "__main__":
+    main()

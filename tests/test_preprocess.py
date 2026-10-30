@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from PIL import Image
 
 from legorec.shape.preprocess import brick_mask, preprocess_crop, preprocess_image
@@ -89,3 +90,49 @@ def test_empty_image_falls_back_to_whole_image():
     a = np.full((300, 200), 128, np.uint8)
     x, px = preprocess_image(a)
     assert x.shape == (96, 96) and px == 300
+
+
+# --- contrast option --------------------------------------------------------
+
+
+def _dark_red_brick():
+    rgb = np.zeros((400, 400, 3), np.uint8)
+    rgb[:] = (40, 90, 200)  # blue card
+    rgb[180:220, 140:260] = (150, 20, 20)  # dark red brick ...
+    for x0 in range(150, 250, 24):  # ... with five lighter 10 x 10 px studs
+        rgb[195:205, x0 : x0 + 10] = (200, 60, 60)
+    return rgb
+
+
+def test_contrast_none_is_the_default():
+    a = _rect_image()
+    x1, px1 = preprocess_image(a)
+    x2, px2 = preprocess_image(a, contrast="none")
+    assert px1 == px2 and np.array_equal(x1, x2)
+
+
+def test_stretch_uses_full_range_inside_the_brick():
+    x_none, _ = preprocess_image(_dark_red_brick(), size=96)
+    x_str, _ = preprocess_image(_dark_red_brick(), size=96, contrast="stretch")
+    centre = (slice(40, 56), slice(20, 76))  # inside the brick
+    assert np.ptp(x_str[centre]) > 2 * np.ptp(x_none[centre])
+    assert x_str[0, 0] == 128  # fixed background value
+
+
+def test_stretch_same_for_photo_and_segmentation_crop():
+    rgb = _dark_red_brick()
+    mask = np.zeros(rgb.shape[:2], bool)
+    mask[180:220, 140:260] = True
+    x_img, px_img = preprocess_image(rgb, contrast="stretch")
+    crop = BrickCrop(image=rgb, mask=mask, bbox=(0, 0, 400, 400))
+    x_crop, px_crop = preprocess_crop(crop, contrast="stretch")
+    assert px_img == px_crop
+    assert np.abs(x_img.astype(int) - x_crop.astype(int)).max() <= 2
+
+
+def test_flat_brick_and_unknown_mode():
+    a = _rect_image()  # one grey value only: nothing to stretch, no crash
+    x, _ = preprocess_image(a, contrast="stretch")
+    assert x.shape == (96, 96)
+    with pytest.raises(ValueError):
+        preprocess_image(a, contrast="equalise")
