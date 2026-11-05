@@ -1,8 +1,8 @@
 """Training augmentation for the shape classifier.
 
 Every training batch gets a random rotation, a small zoom and shift, and a
-random change of brightness and contrast. This is done for the whole batch at
-once on the GPU (or CPU), which is much faster than augmenting image by image.
+random change of brightness and contrast. The whole batch is augmented at once
+on the GPU (or CPU), which is much faster than augmenting image by image.
 
 Rotation is in-plane only, which keeps the handedness of a part. Horizontal
 flips are off by default: only enable them if no class has a mirror twin.
@@ -26,8 +26,13 @@ def denormalize(x: torch.Tensor) -> torch.Tensor:
 
 
 def augment_batch(
-    x, hflip=False, deg=180, scale=(0.9, 1.1), shift=0.1, light=(0.7, 1.3)
-):
+    x: torch.Tensor,
+    hflip: bool = False,
+    deg: float = 180,
+    scale: tuple[float, float] = (0.9, 1.1),
+    shift: float = 0.1,
+    light: tuple[float, float] = (0.7, 1.3),
+) -> torch.Tensor:
     """x: normalised batch (B, 1, H, W) -> augmented batch of the same shape.
 
     How the geometry works: for every image we build a 2 x 3 matrix `theta`
@@ -38,11 +43,12 @@ def augment_batch(
     """
     batch_size, dev = x.shape[0], x.device
 
-    # one random angle, zoom and shift per image
     angle = (torch.rand(batch_size, device=dev) * 2 - 1) * math.radians(deg)
     zoom = torch.empty(batch_size, device=dev).uniform_(*scale)
     move = (torch.rand(batch_size, 2, device=dev) * 2 - 1) * shift
 
+    # theta maps output to input positions, so dividing by a zoom > 1 reads a
+    # smaller area of the input and the brick gets bigger
     cos, sin = torch.cos(angle) / zoom, torch.sin(angle) / zoom
     row1 = torch.stack([cos, -sin, move[:, 0]], 1)
     row2 = torch.stack([sin, cos, move[:, 1]], 1)
@@ -52,8 +58,8 @@ def augment_batch(
         theta[:, :, 0] *= flip[:, None]
 
     grid = F.affine_grid(theta, list(x.shape), align_corners=False)
-    # padding_mode="border": pixels rotated in from outside the image repeat the
-    # edge colour, so there are no black corners (real photos never have them)
+    # pixels rotated in from outside the image repeat the edge colour (the
+    # background) instead of a fixed fill value that photos never have
     x = F.grid_sample(x, grid, padding_mode="border", align_corners=False)
 
     # brightness (multiply) and contrast (stretch around the image mean)

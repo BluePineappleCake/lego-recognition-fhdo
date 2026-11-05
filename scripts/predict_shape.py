@@ -3,7 +3,7 @@
     python scripts/predict_shape.py --checkpoint models/shape_<run>.pt photo1.jpg photo2.jpg
     python scripts/predict_shape.py --checkpoint models/shape_<run>.pt my_photos/
 
-Photos: ONE brick per photo, plain background, no strong shadow (a shadow is
+Photos: one brick per photo, plain background, no strong shadow (a shadow is
 counted as part of the brick). If a folder contains subfolders named after part
 numbers (my_photos/3001/a.jpg ...), those are used as labels and the script
 reports top-1/top-3 accuracy.
@@ -16,6 +16,8 @@ Rough calibration: photograph a 2x4 brick (3001) lying flat, from above, with
 the same camera height; run this script on it with --real_scale 1 and read the
 measured size; then real_scale ~ 373 / measured px (373 px = median size of
 3001 in the renders). Sizes are measured after scaling the photo to 1600 px.
+This is only a rough calibration: the renders show random 3D poses, photos
+usually flat bricks, so the ratio is not the same for every part.
 """
 
 import argparse

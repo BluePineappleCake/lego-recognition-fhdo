@@ -6,10 +6,9 @@ File names look like "3001 brick 2x4 123L.png":
     123              pose number (how the brick is turned)
     L / R            camera (left / right)
 
-Every pose was rendered from two cameras, L and R. These two images are almost
-identical, so they must always end up in the same split. If one were in
-training and the other in the test set, the test would be far too easy.
-That is why we split by POSE ("group" below), not by single image.
+Every pose was rendered by two cameras, and the two images are almost
+identical. If one were in training and the other in the test set, the test
+would be far too easy. So we split by pose ("group" below), not by image.
 """
 
 import csv
@@ -36,17 +35,12 @@ SPLIT_FILE = SPLITS_DIR / "renders.csv"
 @dataclass(frozen=True)
 class RenderImage:
     path: str  # full path of the PNG file
-    part: str  # part number, this is the label, e.g. "3001"
+    part: str  # part number = the label, e.g. "3001"
     name: str  # part number + name, e.g. "3001 brick 2x4"
-    group: str  # part + pose, e.g. "3001_123" (the same for camera L and R)
+    group: str  # part + pose, e.g. "3001_123"; the same for camera L and R
 
 
-# --------------------------------------------------------------------------
-# Find all images
-# --------------------------------------------------------------------------
-
-
-def index_renders(root) -> list[RenderImage]:
+def index_renders(root: str | Path) -> list[RenderImage]:
     """Find all render PNGs below `root` and read part and pose from the names."""
     files = sorted(Path(root).rglob("*.png"))
     if not files:
@@ -73,19 +67,14 @@ def index_renders(root) -> list[RenderImage]:
     return images
 
 
-# --------------------------------------------------------------------------
-# Split into train / val / test
-# --------------------------------------------------------------------------
+def make_split(
+    items: list[RenderImage], seed: int = 42, frac=(0.8, 0.1, 0.1)
+) -> dict[str, str]:
+    """Assign every pose to "train", "val" or "test", e.g. {"3001_123": "train"}.
 
-
-def make_split(items, seed=42, frac=(0.8, 0.1, 0.1)) -> dict[str, str]:
-    """Assign every pose to "train", "val" or "test".
-
-    For EVERY part separately: shuffle its poses (with a fixed seed, so the
-    result is always the same) and give the first 80 % to train, the next 10 %
-    to val and the rest to test. So every part has the same share in each split.
-
-    Returns {group: split}, e.g. {"3001_123": "train", "3001_124": "test", ...}
+    Per part: shuffle its poses with a fixed seed, give the first 80 % to
+    train, the next 10 % to val and the rest to test. So every part has the
+    same share in each split, and the result is the same on every computer.
     """
     train_share, val_share, _ = frac
     random_generator = random.Random(seed)
@@ -96,9 +85,8 @@ def make_split(items, seed=42, frac=(0.8, 0.1, 0.1)) -> dict[str, str]:
 
     split_of_group = {}
     for part in sorted(poses_per_part):
-        groups = sorted(
-            poses_per_part[part]
-        )  # sort first, so the shuffle is repeatable
+        # a set has no fixed order, so sort before shuffling
+        groups = sorted(poses_per_part[part])
         random_generator.shuffle(groups)
 
         n_train = int(train_share * len(groups))
@@ -139,10 +127,12 @@ def split_hash(assign: dict[str, str]) -> str:
     return hashlib.md5(as_text.encode()).hexdigest()[:8]
 
 
-def load_or_create_split(items, path=SPLIT_FILE):
+def load_or_create_split(
+    items: list[RenderImage], path=SPLIT_FILE
+) -> tuple[dict[str, list[RenderImage]], str]:
     """Load the split from the repo, or create it if it does not exist yet.
 
-    The split file is in Git so the whole team uses the same split. Results
+    The split file is in Git so the whole team uses the same split: results
     are only comparable on the same split.
 
     Returns ({"train": [...], "val": [...], "test": [...]}, fingerprint).
@@ -170,21 +160,18 @@ def load_or_create_split(items, path=SPLIT_FILE):
     return dict(images_per_split), split_hash(split_of_group)
 
 
-# --------------------------------------------------------------------------
-# Cache
-# --------------------------------------------------------------------------
+def build_cache(
+    items: list[RenderImage], size: int, cache_file, contrast: str = "none"
+) -> tuple[np.ndarray, np.ndarray]:
+    """Preprocess all images once and store them on disk; later calls load the file.
 
+    Preprocessing 40,000 images takes several minutes, loading the cache a few
+    seconds. Returns x: images (N, size, size) uint8 and px: the measured
+    brick sizes (N,) in pixels.
 
-def build_cache(items, size, cache_file, contrast="none"):
-    """Preprocess all images once and keep the result on disk.
-
-    Preprocessing 40,000 images takes several minutes; loading the cache takes
-    seconds. The cache file contains
-        x:  all preprocessed images, shape (number of images, size, size), uint8
-        px: the measured brick size of every image in pixels
-
-    Make sure the file name changes when the preprocessing changes (see
-    train_shape.py), otherwise an old cache is reused.
+    The cache is only recognised by its file name, so the name must change
+    whenever the preprocessing changes (see load_render_data in
+    legorec.shape.train), otherwise an old cache is reused.
     """
     cache_file = Path(cache_file)
     if cache_file.exists():
