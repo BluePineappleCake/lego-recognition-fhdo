@@ -106,10 +106,29 @@ class SizeNorm:
         return ((log_sizes - self.mu) / self.sd).astype(np.float32)
 
 
+def save_checkpoint(path, model, parts, names, config, split_hash, size_norm) -> None:
+    """Save a trained model with everything ShapeClassifier needs to use it.
+
+    config: the training settings as a dict; ShapeClassifier reads size, width,
+    dropout and, if present, size_feature and contrast from it.
+    """
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "parts": parts,
+            "names": names,
+            "cfg": config,
+            "split_hash": split_hash,
+            "size_norm": {"mu": size_norm.mu, "sd": size_norm.sd},
+        },
+        path,
+    )
+
+
 class ShapeClassifier:
     """A trained model plus everything needed to use it on new images.
 
-    Loads a checkpoint written by scripts/train_shape.py and applies the same
+    Loads a checkpoint written by save_checkpoint and applies the same
     preprocessing settings that were used in training (crop size, contrast).
 
     real_scale: converts brick sizes in photo pixels to render pixels,

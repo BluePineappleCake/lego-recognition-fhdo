@@ -1,5 +1,5 @@
 # Baseline shape classifier: small CNN from scratch, greyscale 96 x 96 crops.
-# Values not set here come from DEFAULTS in scripts/train_shape.py.
+# Values not set here come from TrainConfig in src/legorec/shape/train.py.
 size: 96
 width: 32
 size_feature: false

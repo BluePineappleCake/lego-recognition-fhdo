@@ -4,30 +4,18 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from legorec.shape import predict as shape_predict
-from legorec.shape.model import SmallCNN
+from legorec.shape.model import SizeNorm, SmallCNN, save_checkpoint
 from legorec.types import BrickCrop
 
 PARTS = ["3001", "3002", "3003"]
 
 
 def _save_tiny_checkpoint(path, size_feature=False):
-    """An untrained model with the same file format as scripts/train_shape.py."""
+    """An untrained model, saved the same way as by scripts/train_shape.py."""
     model = SmallCNN(len(PARTS), width=8, size_feature=size_feature)
-    torch.save(
-        {
-            "model": model.state_dict(),
-            "parts": PARTS,
-            "names": {p: f"brick {p}" for p in PARTS},
-            "cfg": {
-                "size": 96,
-                "width": 8,
-                "dropout": 0.3,
-                "size_feature": size_feature,
-            },
-            "size_norm": {"mu": 5.0, "sd": 0.3},
-        },
-        path,
-    )
+    config = {"size": 96, "width": 8, "dropout": 0.3, "size_feature": size_feature}
+    names = {p: f"brick {p}" for p in PARTS}
+    save_checkpoint(path, model, PARTS, names, config, "test", SizeNorm(5.0, 0.3))
     return path
 
 

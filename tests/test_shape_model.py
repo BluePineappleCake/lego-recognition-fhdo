@@ -34,21 +34,14 @@ def test_size_norm():
 def test_shape_classifier_roundtrip(tmp_path):
     from PIL import Image
 
-    from legorec.shape.model import ShapeClassifier
+    from legorec.shape.model import ShapeClassifier, save_checkpoint
 
     parts = ["3001", "3002", "3003"]
     model = SmallCNN(len(parts), width=8, size_feature=True)
     ck = tmp_path / "m.pt"
-    torch.save(
-        {
-            "model": model.state_dict(),
-            "parts": parts,
-            "names": {p: f"brick {p}" for p in parts},
-            "cfg": {"size": 96, "width": 8, "dropout": 0.3, "size_feature": True},
-            "size_norm": {"mu": 5.0, "sd": 0.3},
-        },
-        ck,
-    )
+    config = {"size": 96, "width": 8, "dropout": 0.3, "size_feature": True}
+    names = {p: f"brick {p}" for p in parts}
+    save_checkpoint(ck, model, parts, names, config, "test", SizeNorm(5.0, 0.3))
     with pytest.raises(ValueError):
         ShapeClassifier(ck)  # size model without real_scale
     clf = ShapeClassifier(ck, real_scale=0.5)
