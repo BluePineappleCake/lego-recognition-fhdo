@@ -18,7 +18,7 @@ Photo → Find bricks → Shape (CNN) + Colour → Inventory → "What can I bui
 |---|---|---|
 | Capture | Fixed camera, even light, grey card in every photo | planned |
 | Find bricks | OpenCV contours for separated bricks; YOLO-seg for piles (stretch goal) | planned |
-| Shape | CNN on greyscale cut-outs, trained on renders, fine-tuned on real photos | v0: 94.8 % top-1 on renders, real photos pending |
+| Shape | CNN on greyscale cut-outs, trained on renders, fine-tuned on real photos | v0: ~94.5 % top-1 on renders (single runs vary by ~1 pp); contrast stretch better than baseline on first real photos, see [`docs/experiments.md`](docs/experiments.md) |
 | Colour | White balance via grey card, nearest measured LEGO colour | planned |
 | Inventory | Part, colour, count + confidence | planned |
 | Sets | Coverage and missing parts per set, using Rebrickable part lists | planned |
@@ -50,7 +50,8 @@ pre-commit install
 ```
 
 Optional extras: `.[train]` for PyTorch/timm/W&B (preinstalled on Kaggle),
-`.[app]` for the Streamlit app.
+`.[docs]` for the overview figures (matplotlib, reportlab),
+`.[app]` for the Streamlit app (planned).
 
 > **Training locally with an NVIDIA GPU:** install PyTorch with CUDA **before**
 > `pip install -e ".[dev,train]"`, using the command from
@@ -69,6 +70,16 @@ Data is **not** stored in this repository.
   The test split is frozen: never train or tune on it.
 
 See `data/README.md` for where to put files locally.
+
+**Which bricks are in the renders:** `scripts/class_overview.py` draws all 50
+classes with example renders (PNG/PDF/CSV), `scripts/class_overview_pdf.py`
+makes a PDF table with notes on look-alikes. Both need `.[docs]`:
+
+```bash
+python scripts/class_overview_pdf.py --data <dataset folder> --out docs/figures/classes_table.pdf
+```
+
+`docs/figures/` is generated and not committed.
 
 ## Training the shape classifier
 
@@ -131,10 +142,18 @@ from legorec.shape.predict import predict
 part, confidence = predict(crop)  # crop: BrickCrop from segmentation -> ("3001", 0.93)
 ```
 
-The model is read from `models/shape.pt`: copy the checkpoint the team agreed
-on there (from `models/` or the W&B artifact `shape-cnn`), or set
-`LEGOREC_SHAPE_MODEL`. Size-feature models need `load_model(path, real_scale=...)`
-first, see `src/legorec/shape/predict.py`.
+The model is read from `models/shape.pt`, or from the path in
+`LEGOREC_SHAPE_MODEL`. The current default is the W&B artifact
+`shape-cnn:default`; which run it is and why: [`docs/experiments.md`](docs/experiments.md).
+Download it once:
+
+```bash
+python -c "import wandb; wandb.Api().artifact('lego-fhdo/lego-recognition/shape-cnn:default').download('models')"
+```
+
+The checkpoint stores its preprocessing settings (e.g. `contrast`), so
+`predict` uses the same preprocessing as in training. Size-feature models need
+`load_model(path, real_scale=...)` first, see `src/legorec/shape/predict.py`.
 
 ## Repository structure
 
@@ -144,7 +163,7 @@ src/legorec/     reusable code; so far data/, shape/ and eval/
 configs/         one YAML per experiment
 data/splits/     versioned train/val/test file lists
 notebooks/       exploration only, named NN_initials_topic.ipynb
-scripts/         training and evaluation entry points
+scripts/         training, evaluation and overview figures
 tests/
 docs/            experiment log and progress presentations
 ```

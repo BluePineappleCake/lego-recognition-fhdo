@@ -15,8 +15,9 @@ project `lego-recognition`). Newest entries at the top.
 | `shape_56b289he.pt` | `56b289he` | contrast stretch | current (`mask2`) |
 | `shape_lydt7czi.pt` | `lydt7czi` | size feature | after #13, before contrast option |
 
-`lydt7czi` was missing from the log: render test top-1 = tbd (from W&B),
-W&B tag `size-feature` missing. `shape.pt` was a byte-identical copy of `hki5v89j`.
+`lydt7czi` was missing from the log (render test top-1 = tbd; row added to the
+table of 2026-10-29; W&B tag `size-feature` missing). `shape.pt` was a
+byte-identical copy of `hki5v89j`.
 
 ### First real photos (exploration, not the frozen test set)
 
@@ -25,21 +26,23 @@ W&B tag `size-feature` missing. `shape.pt` was a byte-identical copy of `hki5v89
 | baseline `hki5v89j` | tbd | tbd |
 | contrast `56b289he` | tbd | tbd |
 
-Contrast stretch is better on real photos, although it is worst on renders
-(-2.1 pp). Consistent with the hypothesis of 2026-10-29 (colour bricks are
-too dark in greyscale). Not yet checked: paired comparison (McNemar), which
-colours the gain comes from, more than one seed.
+Contrast stretch is better than the baseline on real photos, although it is
+worse on renders (-2.1 pp). Consistent with the hypothesis of 2026-10-29
+(colour bricks are too dark in greyscale). Not yet checked: paired comparison
+(McNemar), which colours the gain comes from, more than one seed.
 
 ### Default model
 
-`models/shape.pt` = `56b289he` (contrast stretch, seed 0, mask2).
+`models/shape.pt` = `56b289he` (`valiant-pond-9`, W&B artifact `shape-cnn:v2`,
+alias `default`; contrast stretch, seed 0, mask2).
 Provisional until seeds 0–3 and a real val set confirm it.
 Previous default: `hki5v89j` (baseline).
 
 ### Open
 
 - Checkpoints do not store `PREPROCESS_VERSION`: models trained with `mask2`
-  silently run with the newer preprocessing after #18. Store it and warn on mismatch.
+  silently run with the newer preprocessing after #18. Store it and warn on
+  mismatch.
 - Retrain baseline and contrast on current code, seeds 0–3.
 
 ## 2026-10-29 – Robust brick mask, contrast stretch, run-to-run variation
@@ -62,12 +65,13 @@ morphological closing (instead of every pixel that differs in grey value).
 | `wobbly-feather-2` | baseline | first script | 93.70 % | 115 | 137 |
 | `silver-fog-4` | size feature | first script | 94.80 % | 70 | 138 |
 | `o8jomt0u` | baseline | repo before #13 | 94.60 % | 81 | 135 |
+| `lydt7czi` | size feature | after #13 | tbd | tbd | tbd |
 | `hki5v89j` | baseline | current (`mask2`) | 94.45 % | 83 | 139 |
 | `56b289he` | contrast stretch | current (`mask2`) | 92.35 % | 113 | 193 |
 
 All seed 0. `hki5v89j` is confirmed in W&B; `o8jomt0u` and `56b289he` were
 inferred from the export order and confirmed from the checkpoint configs on
-2026-11-05.
+2026-11-05. `lydt7czi` added on 2026-11-05.
 
 **Correction of 2026-10-23, finding 5.** Three baseline runs with the same
 config made 115, 81 and 83 length errors: runs of one config differ by up to
