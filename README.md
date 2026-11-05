@@ -86,6 +86,10 @@ Renders are read from `data/raw/renders/dataset/` (or `--data <folder>`, the
 folder that directly contains the 40,000 PNGs). The first run preprocesses
 everything once into `data/processed/`. Checkpoints go to `models/` and to W&B.
 
+All settings and their defaults are in `TrainConfig`
+(`src/legorec/shape/train.py`). A config file only lists what it changes;
+a key that is not a setting there (e.g. a typo) stops the run with an error.
+
 Results and conclusions so far: [`docs/experiments.md`](docs/experiments.md).
 
 Rules: one change per experiment, compare over several seeds, never tune on
@@ -135,15 +139,33 @@ first, see `src/legorec/shape/predict.py`.
 ## Repository structure
 
 ```
-src/legorec/     reusable code (segmentation, shape, colour, inventory, sets)
+src/legorec/     reusable code; so far data/, shape/ and eval/
+                 (planned: segmentation, colour, inventory, sets)
 configs/         one YAML per experiment
-data/splits/     versioned train/test file lists
+data/splits/     versioned train/val/test file lists
 notebooks/       exploration only, named NN_initials_topic.ipynb
 scripts/         training and evaluation entry points
-app/             Streamlit app
 tests/
 docs/            experiment log and progress presentations
 ```
+
+### Where to start reading
+
+The shape step, in the order the data flows through it:
+
+| File | What it does |
+|---|---|
+| `src/legorec/data/renders.py` | finds the Kaggle renders, splits them by pose, caches the preprocessed images |
+| `src/legorec/shape/preprocess.py` | one brick image → 96 × 96 grey crop + measured size (the same code for renders and photos) |
+| `src/legorec/shape/augment.py` | random rotation, zoom, shift and lighting for every training batch |
+| `src/legorec/shape/model.py` | the CNN with the optional size input, checkpoints, `ShapeClassifier` for new images |
+| `src/legorec/shape/train.py` | `TrainConfig` (all settings), one training epoch, evaluation |
+| `scripts/train_shape.py` | puts it together: data → W&B run → training → test |
+| `src/legorec/eval/metrics.py` | top-1, top-3, macro-F1, length errors |
+| `src/legorec/shape/predict.py` | `predict(crop)`, the interface for the other pipeline steps |
+
+Every file starts with a docstring that explains the idea behind it. The tests
+in `tests/` show how each function is called.
 
 ## Team
 

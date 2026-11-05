@@ -4,9 +4,10 @@ from collections import Counter
 
 import numpy as np
 
-# Same part type in a different length / size. Defined after the first error
-# analysis (docs/experiments.md); used to check whether the size feature helps
-# where it should. Pairs are unordered.
+# Pairs of parts that differ mainly in length or size, collected in the first
+# error analysis (docs/experiments.md). Used to check whether the size feature
+# helps where it should. A few pairs are look-alikes rather than pure length
+# variants, e.g. 3005 (brick 1x1) / 3040 (slope 2x1). Pairs are unordered.
 LENGTH_PAIRS = {
     frozenset(p)
     for p in [
@@ -31,7 +32,7 @@ LENGTH_PAIRS = {
 }
 
 
-def macro_f1(y_true, y_pred) -> float:
+def macro_f1(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """F1 score for every class separately, then the plain average.
 
     Unlike accuracy, every class counts the same, also small or rare ones.
@@ -62,7 +63,7 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     return exp / exp.sum(axis=1, keepdims=True)
 
 
-def classification_metrics(logits: np.ndarray, y: np.ndarray) -> dict:
+def classification_metrics(logits: np.ndarray, y: np.ndarray) -> dict[str, float]:
     """Model scores (N images x C classes) and true labels (N,) ->
 
     top1:     share of images where the best guess is right
@@ -84,7 +85,7 @@ def classification_metrics(logits: np.ndarray, y: np.ndarray) -> dict:
     }
 
 
-def confused_pairs(y, pred, parts) -> Counter:
+def confused_pairs(y, pred, parts: list[str]) -> Counter:
     """Which parts get mixed up how often?
 
     Returns {frozenset({part_a, part_b}): number of errors}, counting both
@@ -98,7 +99,7 @@ def confused_pairs(y, pred, parts) -> Counter:
     return counts
 
 
-def error_breakdown(y, pred, parts) -> dict:
+def error_breakdown(y, pred, parts: list[str]) -> dict[str, int]:
     """Split the errors into length/size confusions (LENGTH_PAIRS) and the rest."""
     pairs = confused_pairs(y, pred, parts)
     length_errors = sum(n for pair, n in pairs.items() if pair in LENGTH_PAIRS)

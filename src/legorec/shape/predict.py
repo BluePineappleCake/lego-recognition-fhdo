@@ -7,7 +7,7 @@ This is the interface the other steps use (issue #7):
     part, confidence = predict(crop)  # e.g. ("3001", 0.93)
 
 `crop` is a BrickCrop from the segmentation step. `confidence` is the softmax
-probability of the best part (0..1). It is NOT calibrated yet: on real photos
+probability of the best part (0..1). It is not calibrated yet: on real photos
 the model can be wrong with 70-80 %.
 
 Which model is used?
@@ -39,7 +39,11 @@ from legorec.types import BrickCrop
 _classifier = None
 
 
-def load_model(checkpoint=None, real_scale=None, device=None) -> ShapeClassifier:
+def load_model(
+    checkpoint: str | Path | None = None,
+    real_scale: float | None = None,
+    device: str | None = None,
+) -> ShapeClassifier:
     """Load a checkpoint and use it for all following predict() calls.
 
     checkpoint: path to a .pt file from scripts/train_shape.py,

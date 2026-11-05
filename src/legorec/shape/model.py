@@ -27,6 +27,7 @@ score could only grow or shrink with the size, never peak at the right one.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -54,20 +55,25 @@ def _conv_block(in_channels, out_channels):
 class SmallCNN(nn.Module):
     """See the module docstring. `width` = channels of the first block."""
 
-    def __init__(self, n_classes, width=32, dropout=0.3, size_feature=False):
+    def __init__(
+        self,
+        n_classes: int,
+        width: int = 32,
+        dropout: float = 0.3,
+        size_feature: bool = False,
+    ):
         super().__init__()
         self.size_feature = size_feature
 
-        # NOTE: the order of these layers must not change, otherwise saved
-        # checkpoints can no longer be loaded (their weights are stored by
-        # position: features.0, features.1, ...).
+        # Do not reorder these layers: checkpoints store the weights by
+        # position (features.0, features.1, ...) and could no longer be loaded.
         self.features = nn.Sequential(
             _conv_block(1, width),
             _conv_block(width, 2 * width),
             _conv_block(2 * width, 4 * width),
             _conv_block(4 * width, 8 * width),
-            nn.AdaptiveAvgPool2d(1),  # average over the remaining 6 x 6 positions
-            nn.Flatten(),  # -> one vector of 8 * width numbers per image
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
             nn.Dropout(dropout),
         )
 
@@ -76,7 +82,7 @@ class SmallCNN(nn.Module):
             n_features += 2  # z and z^2
         self.fc = nn.Linear(n_features, n_classes)
 
-    def forward(self, x, z=None):
+    def forward(self, x: torch.Tensor, z: torch.Tensor | None = None) -> torch.Tensor:
         """x: images (B, 1, 96, 96); z: size feature (B,), only used with size_feature."""
         features = self.features(x)
         if self.size_feature:
@@ -97,19 +103,38 @@ class SizeNorm:
     sd: float
 
     @classmethod
-    def fit(cls, px_train):
+    def fit(cls, px_train) -> "SizeNorm":
         log_sizes = np.log(np.asarray(px_train, dtype=np.float64))
         return cls(float(log_sizes.mean()), float(log_sizes.std()))
 
-    def __call__(self, px):
+    def __call__(self, px) -> np.ndarray:
         log_sizes = np.log(np.asarray(px, dtype=np.float32))
         return ((log_sizes - self.mu) / self.sd).astype(np.float32)
+
+
+def save_checkpoint(path, model, parts, names, config, split_hash, size_norm) -> None:
+    """Save a trained model with everything ShapeClassifier needs to use it.
+
+    config: the training settings as a dict; ShapeClassifier reads size, width,
+    dropout and, if present, size_feature and contrast from it.
+    """
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "parts": parts,
+            "names": names,
+            "cfg": config,
+            "split_hash": split_hash,
+            "size_norm": {"mu": size_norm.mu, "sd": size_norm.sd},
+        },
+        path,
+    )
 
 
 class ShapeClassifier:
     """A trained model plus everything needed to use it on new images.
 
-    Loads a checkpoint written by scripts/train_shape.py and applies the same
+    Loads a checkpoint written by save_checkpoint and applies the same
     preprocessing settings that were used in training (crop size, contrast).
 
     real_scale: converts brick sizes in photo pixels to render pixels,
@@ -118,7 +143,12 @@ class ShapeClassifier:
     scripts/predict_shape.py.
     """
 
-    def __init__(self, checkpoint, device="cpu", real_scale=None):
+    def __init__(
+        self,
+        checkpoint: str | Path,
+        device: str = "cpu",
+        real_scale: float | None = None,
+    ):
         saved = torch.load(checkpoint, map_location=device, weights_only=False)
         config = saved["cfg"]
 
@@ -126,7 +156,7 @@ class ShapeClassifier:
         self.names = saved.get("names", {})  # part number -> readable name
         self.size = config["size"]
         self.size_feature = bool(config.get("size_feature", False))
-        self.contrast = config.get("contrast", "none")  # same as in training
+        self.contrast = config.get("contrast", "none")
         self.size_norm = SizeNorm(**saved.get("size_norm", {"mu": 0.0, "sd": 1.0}))
 
         self.model = SmallCNN(
@@ -173,8 +203,8 @@ class ShapeClassifier:
         top_1 = self._top_k(arrays, sizes, k=1)
         return [best[0] for best in top_1]
 
-    def predict_images(self, images, k=3):
-        """Photos with ONE brick each on a plain background.
+    def predict_images(self, images, k: int = 3):
+        """Photos with one brick each on a plain background.
 
         Returns (top-k [(part number, probability)] per image,
                  the preprocessed images the model saw,
