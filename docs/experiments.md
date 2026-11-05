@@ -4,6 +4,44 @@ Short record of what we tried, what came out, and what we concluded.
 Full curves, configs and confusion matrices are in W&B (team `lego-fhdo`,
 project `lego-recognition`). Newest entries at the top.
 
+## 2026-11-05 – Model files, first real photos, default model
+
+### Run ids confirmed from the checkpoint configs
+
+| File | Run | Config | Code |
+|---|---|---|---|
+| `shape_o8jomt0u.pt` | `o8jomt0u` | baseline | repo before #13 |
+| `shape_hki5v89j.pt` | `hki5v89j` | baseline | current (`mask2`) |
+| `shape_56b289he.pt` | `56b289he` | contrast stretch | current (`mask2`) |
+| `shape_lydt7czi.pt` | `lydt7czi` | size feature | after #13, before contrast option |
+
+`lydt7czi` was missing from the log: render test top-1 = tbd (from W&B),
+W&B tag `size-feature` missing. `shape.pt` was a byte-identical copy of `hki5v89j`.
+
+### First real photos (exploration, not the frozen test set)
+
+| Model | Top-1 | n photos |
+|---|---|---|
+| baseline `hki5v89j` | tbd | tbd |
+| contrast `56b289he` | tbd | tbd |
+
+Contrast stretch is better on real photos, although it is worst on renders
+(-2.1 pp). Consistent with the hypothesis of 2026-10-29 (colour bricks are
+too dark in greyscale). Not yet checked: paired comparison (McNemar), which
+colours the gain comes from, more than one seed.
+
+### Default model
+
+`models/shape.pt` = `56b289he` (contrast stretch, seed 0, mask2).
+Provisional until seeds 0–3 and a real val set confirm it.
+Previous default: `hki5v89j` (baseline).
+
+### Open
+
+- Checkpoints do not store `PREPROCESS_VERSION`: models trained with `mask2`
+  silently run with the newer preprocessing after #18. Store it and warn on mismatch.
+- Retrain baseline and contrast on current code, seeds 0–3.
+
 ## 2026-10-29 – Robust brick mask, contrast stretch, run-to-run variation
 
 ### Robust brick mask (`preprocess.brick_mask`, PR #14)
@@ -27,9 +65,9 @@ morphological closing (instead of every pixel that differs in grey value).
 | `hki5v89j` | baseline | current (`mask2`) | 94.45 % | 83 | 139 |
 | `56b289he` | contrast stretch | current (`mask2`) | 92.35 % | 113 | 193 |
 
-All seed 0. `hki5v89j` is confirmed in W&B; for `o8jomt0u` and `56b289he`
-the mapping of the exported confusion matrices to run ids was inferred from
-the order of the export - check `render_test/top1` in W&B.
+All seed 0. `hki5v89j` is confirmed in W&B; `o8jomt0u` and `56b289he` were
+inferred from the export order and confirmed from the checkpoint configs on
+2026-11-05.
 
 **Correction of 2026-10-23, finding 5.** Three baseline runs with the same
 config made 115, 81 and 83 length errors: runs of one config differ by up to
