@@ -26,7 +26,8 @@ from legorec.types import BrickCrop
 
 # Change this whenever the images produced here change. It is part of the cache
 # file names, so a cache made with the old code is never reused by accident.
-PREPROCESS_VERSION = "mask2"
+# mask2: robust brick mask (#14). mask2-pad: square padded at the image edge.
+PREPROCESS_VERSION = "mask2-pad"
 
 DEFAULT_SIZE = 96  # side length of the classifier input in pixels
 DEFAULT_MARGIN = 0.08  # free space around the brick: 8 % of its size per side
@@ -193,34 +194,31 @@ def _apply_contrast(grey, mask, background, contrast):
 def _cut_out_square(grey, box, background, size, margin) -> np.ndarray:
     """Square around `box` (plus margin), resized to size x size, as uint8.
 
-    Parts of the square that lie outside the image are filled with the
-    background value, so a brick at the image edge still ends up centred.
+    The square is always centred on the brick. Parts of it that lie outside
+    the image are filled with the background value, so a brick at the image
+    edge still ends up in the middle of the result.
     """
     top, bottom, left, right = box
     brick_side = max(bottom - top, right - left)
     square_side = int(brick_side * (1 + 2 * margin)) + 1
 
-    centre_row = (top + bottom) // 2
-    centre_column = (left + right) // 2
+    # top-left corner of the square in image coordinates; negative if the
+    # square sticks out over the top or left edge of the image
+    square_top = (top + bottom) // 2 - square_side // 2
+    square_left = (left + right) // 2 - square_side // 2
 
-    # start with a square full of background ...
+    # the part of the square that lies inside the image (end = exclusive)
+    first_row, first_column = max(square_top, 0), max(square_left, 0)
+    end_row = min(square_top + square_side, grey.shape[0])
+    end_column = min(square_left + square_side, grey.shape[1])
+
+    # start with a square full of background and copy that part to the same
+    # position inside the square (shifting it would move the brick off-centre)
     square = np.full((square_side, square_side), background, dtype=np.int16)
-
-    # ... take the part of the image that lies inside the square ...
-    first_row = max(centre_row - square_side // 2, 0)
-    first_column = max(centre_column - square_side // 2, 0)
-    piece = grey[
-        first_row : first_row + square_side,
-        first_column : first_column + square_side,
-    ]
-
-    # ... and paste it into the middle of the square
-    row_offset = (square_side - piece.shape[0]) // 2
-    column_offset = (square_side - piece.shape[1]) // 2
     square[
-        row_offset : row_offset + piece.shape[0],
-        column_offset : column_offset + piece.shape[1],
-    ] = piece
+        first_row - square_top : end_row - square_top,
+        first_column - square_left : end_column - square_left,
+    ] = grey[first_row:end_row, first_column:end_column]
 
     square_image = Image.fromarray(np.clip(square, 0, 255).astype(np.uint8))
     return np.asarray(square_image.resize((size, size), Image.BILINEAR))

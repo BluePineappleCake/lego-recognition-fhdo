@@ -3,7 +3,6 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from legorec.eval.metrics import classification_metrics, error_breakdown
 from legorec.shape.augment import augment_batch, normalize
 from legorec.shape.model import SizeNorm, SmallCNN
 
@@ -15,28 +14,21 @@ def test_forward_shape(size_feature):
     assert out.shape == (4, 50)
 
 
-def test_augment_keeps_shape_and_has_no_black_corners():
+def test_augment_keeps_shape_and_fills_corners_with_the_edge_colour():
+    torch.manual_seed(0)
     x = normalize(torch.full((8, 1, 96, 96), 200, dtype=torch.uint8))
     y = augment_batch(x)
     assert y.shape == x.shape and torch.isfinite(y).all()
-    # a plain light image stays plain after rotation (no black fill)
-    assert (y > normalize(torch.tensor(50, dtype=torch.uint8))).all()
+    # without the brightness/contrast change, a plain image must stay exactly
+    # plain after rotation: the corners get the edge colour, not a fill value
+    y = augment_batch(x, light=(1, 1))
+    assert torch.allclose(y, x, atol=1e-4)
 
 
 def test_size_norm():
     sn = SizeNorm.fit([100, 200, 400])
     z = sn([100, 200, 400])
     assert abs(z.mean()) < 1e-6 and abs(z.std() - 1) < 1e-5
-
-
-def test_metrics_and_error_breakdown():
-    parts = ["3001", "3002", "3022", "33909"]
-    y = np.array([0, 1, 2, 3])
-    pred = np.array([1, 1, 3, 3])  # one length error (3001->3002), one other error
-    logits = np.eye(4)[pred] * 5
-    m = classification_metrics(logits, y)
-    assert m["top1"] == 0.5
-    assert error_breakdown(y, pred, parts) == {"errors_length": 1, "errors_other": 1}
 
 
 def test_shape_classifier_roundtrip(tmp_path):

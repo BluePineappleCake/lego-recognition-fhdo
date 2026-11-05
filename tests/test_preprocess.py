@@ -46,6 +46,17 @@ def test_crop_ignores_clutter_outside_the_mask():
     assert px == 120
 
 
+def test_brick_at_the_image_edge_gives_the_same_crop_as_in_the_middle():
+    # the square around a brick in the corner reaches outside the image; that
+    # part must be filled with background, not shifted back into the image
+    corner = np.full((400, 400), 200, np.uint8)
+    corner[:40, :120] = 60  # the brick of _rect_image(), moved to the corner
+    x_corner, px_corner = preprocess_image(corner)
+    x_middle, px_middle = preprocess_image(_rect_image())
+    assert px_corner == px_middle == 120
+    assert np.array_equal(x_corner, x_middle)
+
+
 # --- robust mask (brick_mask) ---------------------------------------------
 
 
