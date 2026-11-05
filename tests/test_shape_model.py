@@ -14,12 +14,15 @@ def test_forward_shape(size_feature):
     assert out.shape == (4, 50)
 
 
-def test_augment_keeps_shape_and_has_no_black_corners():
+def test_augment_keeps_shape_and_fills_corners_with_the_edge_colour():
+    torch.manual_seed(0)
     x = normalize(torch.full((8, 1, 96, 96), 200, dtype=torch.uint8))
     y = augment_batch(x)
     assert y.shape == x.shape and torch.isfinite(y).all()
-    # a plain light image stays plain after rotation (no black fill)
-    assert (y > normalize(torch.tensor(50, dtype=torch.uint8))).all()
+    # without the brightness/contrast change, a plain image must stay exactly
+    # plain after rotation: the corners get the edge colour, not a fill value
+    y = augment_batch(x, light=(1, 1))
+    assert torch.allclose(y, x, atol=1e-4)
 
 
 def test_size_norm():

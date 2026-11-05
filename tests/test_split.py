@@ -1,6 +1,12 @@
+from pathlib import Path
+
+from PIL import Image
+
 from legorec.data.renders import (
     FILE_NAME_PATTERN,
     RenderImage,
+    index_renders,
+    load_or_create_split,
     load_split,
     make_split,
     save_split,
@@ -26,11 +32,29 @@ def test_name_pattern():
     assert m["camera"] == "L"
 
 
-def test_both_views_of_a_pose_in_the_same_split():
-    items = _items()
-    assign = make_split(items)
-    # the split is defined per group, so L and R cannot be separated
-    assert len(assign) == len({it.group for it in items})
+def test_both_views_of_a_pose_end_up_in_the_same_split(tmp_path):
+    # camera L and R of one pose are near-copies: index_renders must give them
+    # the same group, otherwise one could land in train and the other in test
+    renders = tmp_path / "renders"
+    renders.mkdir()
+    for pose in range(20):
+        for camera in "LR":
+            file = renders / f"3001 brick 2x4 {pose:03d}{camera}.png"
+            Image.new("L", (4, 4)).save(file)
+
+    images = index_renders(renders)
+    assert len(images) == 40
+    assert len({image.group for image in images}) == 20
+
+    images_per_split, _ = load_or_create_split(images, tmp_path / "split.csv")
+    split_of_file = {
+        Path(image.path).name: split
+        for split, images_in_split in images_per_split.items()
+        for image in images_in_split
+    }
+    for pose in range(20):
+        name = f"3001 brick 2x4 {pose:03d}"
+        assert split_of_file[f"{name}L.png"] == split_of_file[f"{name}R.png"]
 
 
 def test_split_is_stratified_and_deterministic():
