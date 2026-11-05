@@ -31,7 +31,7 @@ LENGTH_PAIRS = {
 }
 
 
-def macro_f1(y_true, y_pred, n_classes) -> float:
+def macro_f1(y_true, y_pred) -> float:
     """F1 score for every class separately, then the plain average.
 
     Unlike accuracy, every class counts the same, also small or rare ones.
@@ -39,16 +39,20 @@ def macro_f1(y_true, y_pred, n_classes) -> float:
         TP: images of this class predicted as this class (correct)
         FP: images of other classes predicted as this class
         FN: images of this class predicted as something else
+
+    Only classes that occur in y_true or y_pred are averaged (same as
+    sklearn's f1_score with average="macro"). Our photos will not show all
+    50 parts: a part that is neither in the photos nor predicted must not
+    count as F1 = 0.
     """
+    y_true, y_pred = np.asarray(y_true), np.asarray(y_pred)
     f1_per_class = []
-    for c in range(n_classes):
+    for c in np.union1d(y_true, y_pred):
         true_pos = np.sum((y_pred == c) & (y_true == c))
         false_pos = np.sum((y_pred == c) & (y_true != c))
         false_neg = np.sum((y_pred != c) & (y_true == c))
-        if true_pos == 0:
-            f1_per_class.append(0.0)
-        else:
-            f1_per_class.append(2 * true_pos / (2 * true_pos + false_pos + false_neg))
+        # never 0 / 0: every class here occurs in y_true or y_pred
+        f1_per_class.append(2 * true_pos / (2 * true_pos + false_pos + false_neg))
     return float(np.mean(f1_per_class))
 
 
@@ -75,7 +79,7 @@ def classification_metrics(logits: np.ndarray, y: np.ndarray) -> dict:
     return {
         "top1": float(np.mean(best_guess == y)),
         "top3": float(np.mean((top_3 == y[:, None]).any(axis=1))),
-        "macro_f1": macro_f1(y, best_guess, n_classes),
+        "macro_f1": macro_f1(y, best_guess),
         "conf": float(probabilities.max(axis=1).mean()),
     }
 

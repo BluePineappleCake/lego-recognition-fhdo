@@ -12,7 +12,7 @@ dependencies = ["numpy", "pandas", "opencv-python", "pyyaml", "pillow"]
 # torch: install the CUDA build from pytorch.org FIRST (PyPI gives CPU-only on Windows)
 train = ["torch", "torchvision", "timm", "wandb"]
 app = ["streamlit"]
-dev = ["pytest", "ruff", "nbstripout", "pre-commit"]
+dev = ["pytest", "ruff", "nbstripout", "pre-commit", "scikit-learn"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

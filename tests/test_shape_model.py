@@ -3,7 +3,6 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from legorec.eval.metrics import classification_metrics, error_breakdown
 from legorec.shape.augment import augment_batch, normalize
 from legorec.shape.model import SizeNorm, SmallCNN
 
@@ -27,16 +26,6 @@ def test_size_norm():
     sn = SizeNorm.fit([100, 200, 400])
     z = sn([100, 200, 400])
     assert abs(z.mean()) < 1e-6 and abs(z.std() - 1) < 1e-5
-
-
-def test_metrics_and_error_breakdown():
-    parts = ["3001", "3002", "3022", "33909"]
-    y = np.array([0, 1, 2, 3])
-    pred = np.array([1, 1, 3, 3])  # one length error (3001->3002), one other error
-    logits = np.eye(4)[pred] * 5
-    m = classification_metrics(logits, y)
-    assert m["top1"] == 0.5
-    assert error_breakdown(y, pred, parts) == {"errors_length": 1, "errors_other": 1}
 
 
 def test_shape_classifier_roundtrip(tmp_path):
