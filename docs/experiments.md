@@ -15,9 +15,9 @@ project `lego-recognition`). Newest entries at the top.
 | `shape_56b289he.pt` | `56b289he` | contrast stretch | current (`mask2`) |
 | `shape_lydt7czi.pt` | `lydt7czi` | size feature | after #13, before contrast option |
 
-`lydt7czi` was missing from the log (render result added to the table of
-2026-10-29; W&B tag `size-feature` missing). `shape.pt` was a byte-identical
-copy of `hki5v89j`.
+`lydt7czi` was missing from the log (render test top-1 = tbd; row added to the
+table of 2026-10-29; W&B tag `size-feature` missing). `shape.pt` was a
+byte-identical copy of `hki5v89j`.
 
 ### First real photos (exploration, not the frozen test set)
 
