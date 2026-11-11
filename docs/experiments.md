@@ -9,6 +9,7 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 
 **Contents:** [Where we stand](#where-we-stand) ·
 [How to read this log](#how-to-read-this-log) ·
+[2026-11-11](#2026-11-11-seeds-0-to-3-for-baseline-and-size-feature) ·
 [2026-11-05](#2026-11-05-model-files-first-real-photos-default-model) ·
 [2026-10-29](#2026-10-29-robust-brick-mask-contrast-stretch-run-to-run-variation) ·
 [2026-10-23](#2026-10-23-shape-classifier-v0-on-renders) ·
@@ -16,12 +17,12 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 
 ## Where we stand
 
-State after the entry of 2026-11-05. Please update this section when you add
+State after the entry of 2026-11-11. Please update this section when you add
 an entry.
 
 **What we know**
 
-1. Baseline and size-feature runs reach 93.7–94.8 % top-1 on the render test
+1. Baseline and size-feature runs reach 93.7–95.5 % top-1 on the render test
    set. Top-3 is almost 100 % (99.5–99.6 % on 2026-10-23): the mistakes are
    confusions between similar parts.
 2. Two runs with the same config can differ by ~0.9 pp top-1 and by up to 34
@@ -30,7 +31,10 @@ an entry.
    same part in a different length, because resizing to 96 × 96 removes the
    absolute size. Giving the network the measured size probably helps, but
    how much is still open: -39 % length errors against the worst baseline run,
-   about -15 % against the newer ones.
+   about -15 % against the newer ones. Seeds 0–3 on the current code
+   (2026-11-11): 78.75 → 70.0 length errors on average (about -11 %) and
+   +0.5 pp top-1, but the ranges overlap, so the effect is small and not
+   final yet.
 4. Contrast stretch is worse on renders (-2.1 pp) but did better on the first
    real photos. It is the default model for now.
 5. On renders the model is underconfident: mean confidence 0.81 at 94.8 %
@@ -38,8 +42,10 @@ an entry.
 
 **Open**
 
-- [ ] Seeds 0–3 for baseline, size feature and contrast stretch on the
-      current code (planned since 2026-10-23).
+- [x] Seeds 0–3 for baseline and size feature on the current code
+      (2026-11-11).
+- [ ] Seeds 0–3 for contrast stretch on the current code.
+- [ ] Sync the offline runs of 2026-11-11 to W&B.
 - [ ] Fill in the missing numbers (tbd): real photos on 2026-11-05, run
       `lydt7czi` on 2026-10-29.
 - [ ] Real photos: compare baseline, contrast stretch and size feature on the
@@ -88,7 +94,53 @@ Code versions in the column *Code*:
 | repo before #13 | shape classifier v0 in the repo ([#11](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/11)) |
 | after #13 | training code simplified, mixed precision removed ([#13](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/13)) |
 | mask2 | robust brick mask, `PREPROCESS_VERSION = "mask2"` ([#14](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/14)) |
-| mask2-pad | current code: the crop square is padded at the image edge instead of shifted ([#18](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/18)). No run in this log uses it yet. |
+| mask2-pad | current code: the crop square is padded at the image edge instead of shifted ([#18](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/18)). First runs: 2026-11-11. |
+
+## 2026-11-11: Seeds 0 to 3 for baseline and size feature
+
+**Question:** Does the size feature really reduce length errors, or was the
+difference between single runs luck? Open since 2026-10-23.
+
+**Setup:** configs `shape_baseline` and `shape_size_feature`, seeds 0–3,
+code mask2-pad (`main` at 3f46094), Kaggle GPU T4 x2, render test set.
+Run by Sami with `WANDB_MODE=offline`: the runs are not in W&B yet, the
+numbers are from the `[render test]` line of the script output.
+
+**Result** (render test set, 4,000 images)
+
+| Config | Seed | Top-1 | Top-3 | Length errors | Other errors |
+|---|---|---|---|---|---|
+| baseline | 0 | 94.55 % | 99.48 % | 78 | 140 |
+| baseline | 1 | 95.03 % | 99.48 % | 80 | 119 |
+| baseline | 2 | 94.40 % | 99.42 % | 75 | 149 |
+| baseline | 3 | 94.40 % | 99.50 % | 82 | 142 |
+| size feature | 0 | 95.43 % | 99.58 % | 72 | 111 |
+| size feature | 1 | 94.50 % | 99.60 % | 83 | 137 |
+| size feature | 2 | 95.05 % | 99.52 % | 68 | 130 |
+| size feature | 3 | 95.45 % | 99.62 % | 57 | 125 |
+
+Mean (min–max) over seeds 0–3:
+
+| Config | Top-1 | Length errors | Other errors |
+|---|---|---|---|
+| baseline | 94.59 % (94.40–95.03) | 78.75 (75–82) | 137.5 (119–149) |
+| size feature | 95.11 % (94.50–95.45) | 70.0 (57–83) | 125.75 (111–137) |
+
+**Conclusion**
+
+1. The size feature lowers the length errors on average from 78.75 to 70.0
+   (about -11 %) and raises top-1 by about 0.5 pp.
+2. The ranges overlap: size feature seed 1 has 83 length errors, more than
+   every baseline run. The effect is probably real but small; 4 seeds are
+   not enough to call it final.
+3. On the current code the baseline is stable (75–82 length errors). The 115
+   of `wobbly-feather-2` came from the first script.
+4. Unexpected: the other errors also go down (137.5 → 125.75). The
+   hypothesis was that the size only helps the length pairs.
+
+**Open:** sync the offline runs to W&B; seeds 0–3 for contrast stretch; more
+seeds or a paired test if a decision depends on the size feature; why do the
+other errors go down?
 
 ## 2026-11-05: Model files, first real photos, default model
 
