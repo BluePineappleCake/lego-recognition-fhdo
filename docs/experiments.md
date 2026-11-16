@@ -105,6 +105,8 @@ difference between single runs luck? Open since 2026-10-23.
 code mask2-pad (`main` at 3f46094), Kaggle GPU T4 x2, render test set.
 Run by Sami with `WANDB_MODE=offline`: the runs are not in W&B yet, the
 numbers are from the `[render test]` line of the script output.
+Run ids (seeds 0–3): baseline `trpurok9`, `3o8pk2ul`, `7v5xgsk1`, `6xpj1iq9`;
+size feature `xbzi8q4v`, `d1sq4h9f`, `yt6ml3qe`, `k1c17b38`.
 
 **Result** (render test set, 4,000 images)
 
