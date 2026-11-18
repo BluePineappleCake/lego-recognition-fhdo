@@ -128,12 +128,15 @@ def split_hash(assign: dict[str, str]) -> str:
 
 
 def load_or_create_split(
-    items: list[RenderImage], path=SPLIT_FILE
+    items: list[RenderImage], path=SPLIT_FILE, frac=(0.8, 0.1, 0.1)
 ) -> tuple[dict[str, list[RenderImage]], str]:
     """Load the split from the repo, or create it if it does not exist yet.
 
     The split file is in Git so the whole team uses the same split: results
     are only comparable on the same split.
+
+    `frac` is only used when the file is created. Works for any items with
+    .part and .group (also legorec.data.internet).
 
     Returns ({"train": [...], "val": [...], "test": [...]}, fingerprint).
     """
@@ -142,7 +145,7 @@ def load_or_create_split(
         split_of_group = load_split(path)
         print(f"[split] loaded {path}")
     else:
-        split_of_group = make_split(items)
+        split_of_group = make_split(items, frac=frac)
         save_split(split_of_group, path)
         print(f"[split] created {path} -> commit it, the whole team must use it")
 
