@@ -26,6 +26,11 @@ def renders_dir() -> Path:
     return data_dir() / "raw" / "renders" / "dataset"
 
 
+def internet_dir() -> Path:
+    """Folder of the internet dataset; contains photos/ (and renders/)."""
+    return data_dir() / "raw" / "internet"
+
+
 def processed_dir() -> Path:
     return Path(os.environ.get("LEGOREC_PROCESSED", data_dir() / "processed"))
 

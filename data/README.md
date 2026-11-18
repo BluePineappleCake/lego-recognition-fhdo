@@ -73,6 +73,26 @@ Adding new photos: create a new session folder, add rows to `photos.csv`,
 upload a new version of the Kaggle dataset. Never rename or delete
 existing photos, the splits refer to them by path.
 
+## 2b. Internet photos (extra real data)
+
+Source: tbd (name, link and licence also go into `Quellen.txt`).
+Unzip into `data/raw/internet/` so that `data/raw/internet/photos/` exists,
+or pass the folder with `--data`.
+
+- `photos/<part folder>/`: 3,683 real photos of 18 parts, one brick per
+  image, tightly cropped. 13 parts are among our 50 render classes; the other
+  5 (2654, 3009, 3666, 3710, 6215) are not.
+- `renders/`: ~44,000 coloured renders of the same 18 parts. Not used yet.
+- The label is the folder name. A file name like
+  `c1_5_pcsp_original_3001_1609710513579.jpg` means camera 1 of capture
+  `5_pcsp_original_3001_1609710513579`: all cameras of a capture show the
+  same brick at the same moment.
+- Tightly cropped: the brick size in pixels says nothing about the real
+  size, so do not use `size_feature` with these photos.
+
+Code: `legorec.data.internet`. Overview and split check:
+`python scripts/internet_split.py --data <folder>`.
+
 ## 3. Rebrickable
 
 Download from https://rebrickable.com/downloads/ into `data/raw/rebrickable/`:
@@ -85,6 +105,10 @@ Download from https://rebrickable.com/downloads/ into `data/raw/rebrickable/`:
 L and R); both views always share a split, otherwise near-copies of training
 images end up in the test set. Never regenerate this file: all render results
 are only comparable on the same split.
+
+`data/splits/internet.csv` assigns every **capture** of the internet photos
+to `train`, `val` or `test` (70 / 15 / 15 %, stratified per part, all 18
+parts). All cameras of one capture share a split. Never regenerate it either.
 
 `data/splits/finetune.csv` and `data/splits/test.csv` list photo paths.
 

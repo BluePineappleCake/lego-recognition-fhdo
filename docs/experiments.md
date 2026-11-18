@@ -9,6 +9,7 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 
 **Contents:** [Where we stand](#where-we-stand) ·
 [How to read this log](#how-to-read-this-log) ·
+[2026-11-18](#2026-11-18-internet-photos-first-large-real-photo-evaluation) ·
 [2026-11-11](#2026-11-11-seeds-0-to-3-for-baseline-and-size-feature) ·
 [2026-11-05](#2026-11-05-model-files-first-real-photos-default-model) ·
 [2026-10-29](#2026-10-29-robust-brick-mask-contrast-stretch-run-to-run-variation) ·
@@ -17,7 +18,7 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 
 ## Where we stand
 
-State after the entry of 2026-11-11. Please update this section when you add
+State after the entry of 2026-11-18. Please update this section when you add
 an entry.
 
 **What we know**
@@ -35,10 +36,15 @@ an entry.
    (2026-11-11): 78.75 → 70.0 length errors on average (about -11 %) and
    +0.5 pp top-1, but the ranges overlap, so the effect is small and not
    final yet.
-4. Contrast stretch is worse on renders (-2.1 pp) but did better on the first
-   real photos. It is the default model for now.
+4. Contrast stretch is worse on renders (-2.1 pp) but much better on real
+   photos: 25.8 % vs 2.5 % top-1 on the internet photos (val), significant on
+   captures (McNemar 24 / 0, p < 0.001). It stays the default model.
 5. On renders the model is underconfident: mean confidence 0.81 at 94.8 %
-   accuracy.
+   accuracy. On real photos it is overconfident: 0.46 at 25.8 %.
+6. The render-to-real gap is huge: ~92 % on renders vs 25.8 % on real photos
+   for the default model; the greyscale baseline is at chance level (2.5 %,
+   chance = 2 %). Part of it is preprocessing (shadows, light bricks on light
+   background: about +6 pp with a stricter mask threshold), most of it is not.
 
 **Open**
 
@@ -48,9 +54,13 @@ an entry.
 - [ ] Sync the offline runs of 2026-11-11 to W&B.
 - [ ] Fill in the missing numbers (tbd): real photos on 2026-11-05, run
       `lydt7czi` on 2026-10-29.
-- [ ] Real photos: compare baseline, contrast stretch and size feature on the
-      same photos; paired test (McNemar); find out which colours the gain
-      comes from.
+- [x] Real photos: compare baseline and contrast stretch on the same photos
+      with a paired test (McNemar). → 2026-11-18 (internet photos).
+- [ ] Find out which colours the contrast-stretch gain comes from.
+- [ ] Train on renders + `internet/train`; evaluate on `internet/val` and on
+      our own photos.
+- [ ] Shadows: `brick_mask` counts the shadow as brick. Fix it, then check on
+      renders that nothing gets worse (`scripts/check_preprocess.py`).
 - [ ] Size feature on real photos: calibrate `real_scale` (e.g. grey card +
       fixed camera). The size distribution will differ: renders show random
       3D poses, real bricks lie flat.
@@ -143,6 +153,85 @@ Mean (min–max) over seeds 0–3:
 **Open:** sync the offline runs to W&B; seeds 0–3 for contrast stretch; more
 seeds or a paired test if a decision depends on the size feature; why do the
 other errors go down?
+
+## 2026-11-18: Internet photos, first large real-photo evaluation
+
+**Question:** How large is the render-to-real gap on many real photos? How
+much of it comes from the preprocessing and how much from the model?
+
+**Setup:**
+
+- Data: internet photos ([data/README.md](../data/README.md), section 2b),
+  split `data/splits/internet.csv` (`e4434e94`), **val**, only the 13 parts
+  that are also render classes: 356 photos from 96 captures (one capture = one
+  brick, seen by 2–6 cameras).
+- Models: `hki5v89j` (baseline, mask2), `o8jomt0u` (baseline, repo before
+  #13), `56b289he` (contrast stretch, mask2). `lydt7czi` skipped: size
+  feature, and the photos are tightly cropped, so the brick size in pixels
+  says nothing.
+- Preprocessing: current code (`mask2-pad`), although the checkpoints were
+  trained with older versions (open item `PREPROCESS_VERSION`).
+- Script: `scripts/eval_internet.py`.
+
+**Result** (internet val, 356 photos / 96 captures):
+
+| Run | Config | Top-1 | Top-3 | Top-1 among the 13 | Top-1 per capture | Conf | Length errors | Other errors |
+|---|---|---|---|---|---|---|---|---|
+| `hki5v89j` | baseline | 2.5 % | 9.3 % | 12.4 % | 3.1 % | 0.58 | 2 | 345 |
+| `o8jomt0u` | baseline | 1.7 % | 8.1 % | 12.1 % | 2.1 % | 0.56 | 2 | 348 |
+| `56b289he` | contrast stretch | 25.8 % | 40.4 % | 38.2 % | 28.1 % | 0.46 | 45 | 219 |
+
+- *Top-1 among the 13:* best guess among the parts that occur in these
+  photos. *Per capture:* one answer per capture, mean probability over its
+  cameras.
+- McNemar `hki5v89j` vs `56b289he`: images 2 / 85, captures 0 / 24
+  (only baseline right / only contrast right), p < 0.001 for both. The test on
+  captures is the honest one: cameras of one capture are not independent.
+- `hki5v89j` vs `o8jomt0u`: no difference (captures 2 / 1, p = 1.0).
+
+Mask threshold `thr` of `brick_mask` (exploration on val, not a setting we
+keep):
+
+| `thr` | 12 (default) | 20 | 30 | 45 |
+|---|---|---|---|---|
+| `56b289he` | 25.8 % | 30.6 % | 31.7 % | 28.1 % |
+| `hki5v89j` | 2.5 % | 2.5 % | 3.1 % | 3.4 % |
+
+**What the model sees** (one photo per capture, photo | 96 × 96 crop,
+green = right):
+[crops 1](figures/2026-11-18_internet_val_crops_1.jpg),
+[crops 2](figures/2026-11-18_internet_val_crops_2.jpg)
+
+1. In most crops the brick is found, but about half show a light halo: the
+   shadow is counted as brick and the stretch makes it bright. The renders
+   have no shadows.
+2. About 8 of 96 crops are unusable: white or beige bricks on a light
+   background, only fragments of the brick are left.
+3. Many errors are on clean crops: 3005 (brick 1×1) is wrong in all 57 photos,
+   mostly as 3063 (curved brick); 3062 (round brick 1×1) 0 / 18; 3003 → 99301
+   / 3046 (roof tiles); dark green 3021 → 3020.
+4. 3020 (plate 2×4) is right 22 / 22, but it is also the most frequent answer
+   (65 times): partly a bias, not only recognition.
+
+**Conclusion:**
+
+1. The gap is huge: ~92 % on renders vs 25.8 % on real photos for the default
+   model. Without the contrast stretch the model is at chance level.
+2. Contrast stretch is clearly the better default on real photos, now on
+   enough photos for a significant paired test.
+3. The preprocessing explains a part (+6 pp with a stricter threshold), most
+   of the gap remains: the model itself does not transfer.
+4. Limits: the internet photos are not our setup (tightly cropped, other
+   camera, other light). They show the size of the problem, the number that
+   counts stays the one on our own photos. `internet/test` is untouched.
+
+**Open:**
+
+- Train with renders + `internet/train` (new config), evaluate on
+  `internet/val` and on our own photos.
+- Handle shadows in `brick_mask`, check on renders with
+  `scripts/check_preprocess.py`.
+- Retrain on the current code (`mask2-pad`) before comparing further.
 
 ## 2026-11-05: Model files, first real photos, default model
 
