@@ -78,3 +78,21 @@ def test_model_can_memorise_one_batch():
         SizeNorm(0.0, 1.0),
     )
     assert loss < 0.1
+
+
+def test_real_photos_are_repeated_and_appended():
+    from legorec.shape.train import add_real_photos
+
+    renders = (np.zeros((5, 4, 4), np.uint8), np.ones(5, np.float32), [0] * 5)
+    photos = (np.full((2, 4, 4), 7, np.uint8), np.zeros(2, np.float32), [1, 2])
+    x, z, y = add_real_photos(renders, photos, repeat=3)
+
+    assert x.shape == (11, 4, 4) and z.shape == (11,) and len(y) == 11
+    assert y == [0] * 5 + [1, 2] * 3
+    assert (x[5:] == 7).all() and (x[:5] == 0).all()
+
+
+def test_missing_internet_folder_is_skipped(tmp_path):
+    from legorec.shape.train import load_internet_data
+
+    assert load_internet_data(TrainConfig(), ["3001"], tmp_path) is None

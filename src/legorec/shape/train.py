@@ -3,6 +3,12 @@
 scripts/train_shape.py puts them together and adds the W&B logging. They live
 here, without W&B, so they can be tested and reused later (e.g. for
 fine-tuning on our own photos).
+
+Real photos (legorec.data.internet) are used in two ways:
+    - always, if the folder exists: internet/val is evaluated after every
+      epoch, so every run reports how well it transfers to real photos
+    - with real_train: internet, the internet/train photos are also added to
+      the training set (each one real_repeat times per epoch)
 """
 
 import random
@@ -14,8 +20,9 @@ import torch
 import torch.nn.functional as F
 import yaml
 
+from legorec.data.internet import index_photos, load_or_create_photo_split, only_parts
 from legorec.data.renders import build_cache, index_renders, load_or_create_split
-from legorec.paths import processed_dir, renders_dir
+from legorec.paths import internet_dir, processed_dir, renders_dir
 from legorec.shape.augment import augment_batch
 from legorec.shape.model import SizeNorm
 from legorec.shape.preprocess import PREPROCESS_VERSION
@@ -37,6 +44,8 @@ class TrainConfig:
     weight_decay: float = 5e-4
     label_smoothing: float = 0.1  # target ~0.9 instead of 1 for the right class
     hflip: bool = False  # mirror images; only if no part has a mirror twin
+    real_train: str = "none"  # "internet": also train on the internet/train photos
+    real_repeat: int = 8  # how often every real photo is used per epoch
     seed: int = 0
     project: str = "lego-recognition"  # W&B project
     tags: list[str] = field(default_factory=lambda: ["renders-only"])
@@ -109,6 +118,62 @@ def load_render_data(
         for split, (x, sizes_px, labels) in raw.items()
     }
     return RenderData(splits, parts, names, size_norm, split_hash)
+
+
+@dataclass
+class RealData:
+    """Internet photos of the parts the model knows, preprocessed like the renders."""
+
+    # "train" / "val" / "test" -> (images, z, labels), same layout as RenderData
+    splits: dict[str, tuple[np.ndarray, np.ndarray, list[int]]]
+    split_hash: str  # fingerprint of data/splits/internet.csv
+
+
+def load_internet_data(
+    config: TrainConfig, parts: list[str], data_dir: str | Path | None = None
+) -> RealData | None:
+    """Internet photos -> split by capture -> preprocessed arrays (cached on disk).
+
+    Only photos of `parts` are kept, labelled with the same class index as the
+    renders. Returns None if the folder does not exist (e.g. on Kaggle without
+    the dataset), so training on renders still works without it.
+
+    The size feature z is always 0 ("average size"): the photos are tightly
+    cropped, so the measured size in pixels says nothing about the real size.
+    """
+    root = Path(data_dir or internet_dir())
+    if not (root / "photos").is_dir():
+        print(f"[data] no internet photos in {root}, skipping them")
+        return None
+
+    label_of_part = {part: label for label, part in enumerate(parts)}
+    photos_per_split, split_hash = load_or_create_photo_split(index_photos(root))
+    cache_tag = f"{config.size}_{PREPROCESS_VERSION}_{config.contrast}_{split_hash}"
+
+    splits = {}
+    for split in ("train", "val", "test"):
+        photos = only_parts(photos_per_split[split], set(parts))
+        cache_file = processed_dir() / f"internet_{split}_{cache_tag}.npz"
+        x, _ = build_cache(photos, config.size, cache_file, config.contrast)
+        z = np.zeros(len(photos), dtype=np.float32)
+        splits[split] = (x, z, [label_of_part[photo.part] for photo in photos])
+        print(f"[data] internet {split}: {len(photos)} photos")
+    return RealData(splits, split_hash)
+
+
+def add_real_photos(render_train, real_train, repeat: int):
+    """Training arrays of the renders + every real photo `repeat` times.
+
+    Without repeating, ~1,900 photos next to 32,000 renders would hardly
+    matter. With repeat 8 they are about a third of every epoch. Repeated
+    copies are not identical for the network: every batch is augmented anew.
+    """
+    x_r, z_r, y_r = render_train
+    x_p, z_p, y_p = real_train
+    x = np.concatenate([x_r] + [x_p] * repeat)
+    z = np.concatenate([z_r] + [z_p] * repeat)
+    y = list(y_r) + list(y_p) * repeat
+    return x, z.astype(np.float32), y
 
 
 def train_epoch(

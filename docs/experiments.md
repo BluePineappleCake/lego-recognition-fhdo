@@ -9,6 +9,7 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 
 **Contents:** [Where we stand](#where-we-stand) ·
 [How to read this log](#how-to-read-this-log) ·
+[2026-11-18 (2)](#2026-11-18-2-training-with-renders--internet-photos) ·
 [2026-11-18](#2026-11-18-internet-photos-first-large-real-photo-evaluation) ·
 [2026-11-05](#2026-11-05-model-files-first-real-photos-default-model) ·
 [2026-10-29](#2026-10-29-robust-brick-mask-contrast-stretch-run-to-run-variation) ·
@@ -17,7 +18,7 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 
 ## Where we stand
 
-State after the entry of 2026-11-18. Please update this section when you add
+State after the second entry of 2026-11-18. Please update this section when you add
 an entry.
 
 **What we know**
@@ -41,18 +42,26 @@ an entry.
    for the default model; the greyscale baseline is at chance level (2.5 %,
    chance = 2 %). Part of it is preprocessing (shadows, light bricks on light
    background: about +6 pp with a stricter mask threshold), most of it is not.
+7. Adding the internet photos to training (`shape_contrast_internet`) lifts
+   internet val from 25.2 % to 93.4 % (3 seeds each) and costs nothing
+   measurable on renders (92.2 % vs 92.0 %). Train and val photos come from
+   the same camera rig, so this is an upper bound: whether it helps on our own
+   photos is still open.
 
 **Open**
 
 - [ ] Seeds 0–3 for baseline, size feature and contrast stretch on the
-      current code (planned since 2026-10-23).
+      current code (planned since 2026-10-23). Contrast stretch: seeds 0–2
+      done on 2026-11-18 (2).
 - [ ] Fill in the missing numbers (tbd): real photos on 2026-11-05, run
       `lydt7czi` on 2026-10-29.
 - [x] Real photos: compare baseline and contrast stretch on the same photos
       with a paired test (McNemar). → 2026-11-18 (internet photos).
 - [ ] Find out which colours the contrast-stretch gain comes from.
-- [ ] Train on renders + `internet/train`; evaluate on `internet/val` and on
-      our own photos.
+- [x] Train on renders + `internet/train`, evaluate on `internet/val`.
+      → 2026-11-18 (2).
+- [ ] Evaluate the renders-only and the mixed models on our own photos
+      (freeze `test.csv` first). This decides the new default model.
 - [ ] Shadows: `brick_mask` counts the shadow as brick. Fix it, then check on
       renders that nothing gets worse (`scripts/check_preprocess.py`).
 - [ ] Size feature on real photos: calibrate `real_scale` (e.g. grey card +
@@ -99,6 +108,74 @@ Code versions in the column *Code*:
 | after #13 | training code simplified, mixed precision removed ([#13](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/13)) |
 | mask2 | robust brick mask, `PREPROCESS_VERSION = "mask2"` ([#14](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/14)) |
 | mask2-pad | current code: the crop square is padded at the image edge instead of shifted ([#18](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/18)). No run in this log uses it yet. |
+
+## 2026-11-18 (2): Training with renders + internet photos
+
+**Question:** Do real photos in the training set close the render-to-real
+gap? And what do they cost on renders?
+
+**Setup:**
+
+- Configs: [`configs/shape_contrast.yaml`](../configs/shape_contrast.yaml)
+  (renders only) and
+  [`configs/shape_contrast_internet.yaml`](../configs/shape_contrast_internet.yaml):
+  the same plus the 1,901 photos of `internet/train` (13 parts), each used 8
+  times per epoch (`real_repeat: 8`): 47,208 training images per epoch, about
+  a third real photos.
+- Code: `mask2-pad`, seeds 0, 1, 2 for each config. Model selection as
+  always on the render val set.
+- `internet/val` is now logged after every epoch (`internet_val/*` in W&B)
+  for every run. Final numbers below with `scripts/eval_internet.py`.
+- Speed on the RTX 4080: ~9 s per epoch renders only, ~11–14 s with photos.
+
+**Result:**
+
+| Run | Config | Seed | Render test top-1 | Length / other errors | Internet val top-1 | Top-3 | Per capture | Conf |
+|---|---|---|---|---|---|---|---|---|
+| `efgo8od0` | renders only | 0 | 92.03 % | 113 / 206 | 23.3 % | 38.8 % | 29.2 % | 0.43 |
+| `czendws5` | renders only | 1 | 92.10 % | 120 / 196 | 24.2 % | 39.6 % | 31.2 % | 0.44 |
+| `7igjkjkp` | renders only | 2 | 92.45 % | 113 / 189 | 28.1 % | 43.5 % | 32.3 % | 0.44 |
+| `rydhagpu` | + internet | 0 | 91.80 % | 107 / 221 | 93.3 % | 98.3 % | 95.8 % | 0.83 |
+| `x32vqyv2` | + internet | 1 | 92.47 % | 106 / 195 | 93.5 % | 98.0 % | 95.8 % | 0.82 |
+| `p29f3lck` | + internet | 2 | 91.70 % | 105 / 227 | 93.5 % | 98.6 % | 97.9 % | 0.83 |
+
+Mean (range) over the 3 seeds:
+
+| Config | Render test top-1 | Length errors | Other errors | Internet val top-1 | Per capture |
+|---|---|---|---|---|---|
+| renders only | 92.2 % (92.0–92.5) | 115 | 197 | 25.2 % (23.3–28.1) | 30.9 % |
+| + internet | 92.0 % (91.7–92.5) | 106 | 214 | 93.4 % (93.3–93.5) | 96.5 % |
+
+- McNemar on captures, every renders-only model vs every mixed model: 0 vs
+  61–66 captures, p < 0.001. Between seeds of the same config: p ≥ 0.5.
+- Image-level McNemar is misleading here: two renders-only seeds differ with
+  p = 0.02 on images but p = 0.55 on captures. Only use the capture test.
+- Macro-F1 on internet val (0.81–0.92 for the mixed models) is not reliable
+  with 13 parts: one stray prediction of a part that is not in the photos
+  adds a class with F1 = 0 to the average. Use top-1 per capture.
+
+**Curves:** renders-only models jump between 4 % and 31 % on internet val from
+epoch to epoch; the transfer is luck, not learned. With photos, internet val
+rises steadily to ~93 % by epoch 20 and stays there, so model selection on
+render val also picks a good epoch for the photos.
+
+**Conclusion:**
+
+1. Real photos in training close the gap on the internet photos almost
+   completely (25 % → 93 %) and make the confidences sensible again (0.83 at
+   93 %).
+2. Cost on renders: none measurable. Top-1 -0.2 pp, within the seed range;
+   fewer length errors, slightly more other errors.
+3. This is an upper bound: train and val photos come from the same rig (same
+   light, background, cropping, partly the same bricks). The model may have
+   learned the rig rather than real bricks. The real test is our own photos.
+4. `models/shape.pt` stays `56b289he` until that test is done.
+
+**Open:**
+
+- Our own photos: freeze `test.csv`, evaluate all six models.
+- Fewer repeats (`real_repeat: 2, 4`) and fewer photos: how many real photos
+  are needed?
 
 ## 2026-11-18: Internet photos, first large real-photo evaluation
 

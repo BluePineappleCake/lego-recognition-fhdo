@@ -4,17 +4,24 @@
     python scripts/train_shape.py --config configs/shape_baseline.yaml
     python scripts/train_shape.py --config configs/shape_size_feature.yaml --seed 1
     python scripts/train_shape.py --config configs/shape_baseline.yaml --data C:\\lego\\data
+    python scripts/train_shape.py --config configs/shape_contrast_internet.yaml
 
 --data: folder that directly contains the 40,000 PNGs (default: see legorec.paths).
+--internet-data: folder with photos/ of the internet dataset
+    (default: data/raw/internet). If it does not exist, it is skipped.
 All settings and their defaults: TrainConfig in src/legorec/shape/train.py.
 To try a trained model on real photos, use scripts/predict_shape.py.
 
 What happens, in order:
-    1. read the config, load (or build) the preprocessed renders
+    1. read the config, load (or build) the preprocessed renders and, if
+       available, the internet photos (with real_train: internet their train
+       split is added to the training set)
     2. start a W&B run and log a few training images
-    3. train for N epochs; after every epoch check the validation set and keep
-       the checkpoint with the best validation macro-F1
+    3. train for N epochs; after every epoch check the render validation set
+       (and internet/val, logged as internet_val/*) and keep the checkpoint
+       with the best render validation macro-F1
     4. load that best checkpoint and evaluate it once on the render test set
+       and on internet/val. internet/test is never touched here.
 """
 
 import argparse
@@ -33,9 +40,12 @@ from legorec.shape.loaders import Batches
 from legorec.shape.model import SmallCNN, save_checkpoint
 from legorec.shape.preprocess import PREPROCESS_VERSION
 from legorec.shape.train import (
+    RealData,
     RenderData,
     TrainConfig,
+    add_real_photos,
     evaluate,
+    load_internet_data,
     load_render_data,
     overfit_one_batch,
     set_seed,
@@ -49,19 +59,23 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--data", default=None)
+    parser.add_argument("--internet-data", default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--sanity", action="store_true", help="overfit one batch only")
     return parser.parse_args()
 
 
-def start_wandb_run(config: TrainConfig, data: RenderData, sanity: bool):
+def start_wandb_run(
+    config: TrainConfig, data: RenderData, real: RealData | None, sanity: bool
+):
     tags = list(config.tags)
     if config.size_feature:
         tags.append("size-feature")
 
     logged_config = asdict(config) | {
         "split_hash": data.split_hash,
+        "internet_split_hash": real.split_hash if real else None,
         "n_classes": len(data.parts),
         "preprocess": PREPROCESS_VERSION,
     }
@@ -108,6 +122,23 @@ def evaluate_on_test(model, test, data: RenderData) -> dict:
     return metrics
 
 
+def evaluate_on_internet_val(model, internet_val, data: RenderData) -> dict:
+    """Evaluate the best checkpoint on internet/val and log it.
+
+    Same numbers as scripts/eval_internet.py (top1, top3, macro_f1, conf):
+    50-way, all images, one row per photo.
+    """
+    scores, labels, _ = evaluate(model, internet_val)
+    metrics = classification_metrics(scores, labels)
+    metrics |= error_breakdown(labels, scores.argmax(axis=1), data.parts)
+    wandb.run.summary.update({f"internet_val/{key}": v for key, v in metrics.items()})
+    print(
+        f"[internet val] top1 {metrics['top1']:.4f}  top3 {metrics['top3']:.4f}  "
+        f"macro-F1 {metrics['macro_f1']:.4f}"
+    )
+    return metrics
+
+
 def main():
     args = parse_args()
     config = TrainConfig.from_yaml(args.config, seed=args.seed, epochs=args.epochs)
@@ -118,13 +149,34 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # 1. data
+    if config.real_train not in ("none", "internet"):
+        raise ValueError(
+            f"real_train must be none or internet, not {config.real_train}"
+        )
+    if config.real_train != "none" and config.size_feature:
+        # the photos are tightly cropped: their size in pixels means nothing
+        raise ValueError("real_train cannot be combined with size_feature")
+
     data = load_render_data(config, args.data)
-    train = Batches(*data.splits["train"], device, config.batch_size, shuffle=True)
+    real = load_internet_data(config, data.parts, args.internet_data)
+    train_arrays = data.splits["train"]
+    if config.real_train == "internet":
+        if real is None:
+            raise FileNotFoundError("real_train: internet, but no internet photos")
+        train_arrays = add_real_photos(
+            train_arrays, real.splits["train"], config.real_repeat
+        )
+        print(f"[data] train with internet photos: {len(train_arrays[2])} images")
+
+    train = Batches(*train_arrays, device, config.batch_size, shuffle=True)
     val = Batches(*data.splits["val"], device, EVAL_BATCH_SIZE)
     test = Batches(*data.splits["test"], device, EVAL_BATCH_SIZE)
+    internet_val = (
+        Batches(*real.splits["val"], device, EVAL_BATCH_SIZE) if real else None
+    )
 
     # 2. logging
-    run = start_wandb_run(config, data, args.sanity)
+    run = start_wandb_run(config, data, real, args.sanity)
     print(f"[run] device {device}, size feature {config.size_feature}")
     log_sample_images(data, device, config)
 
@@ -164,17 +216,23 @@ def main():
         )
         val_scores, val_labels, val_loss = evaluate(model, val)
         val_metrics = classification_metrics(val_scores, val_labels)
+        real_metrics = {}
+        if internet_val is not None:
+            real_scores, real_labels, _ = evaluate(model, internet_val)
+            real_metrics = classification_metrics(real_scores, real_labels)
         seconds = time.time() - start
 
         wandb.log(
             {"epoch": epoch, "train/loss": train_loss, "train/top1": train_acc}
             | {f"val/{key}": value for key, value in val_metrics.items()}
+            | {f"internet_val/{key}": value for key, value in real_metrics.items()}
             | {"val/loss": val_loss, "lr": scheduler.get_last_lr()[0]}
             | {"epoch_time_s": seconds}
         )
+        real_text = f"  internet {real_metrics['top1']:.3f}" if real_metrics else ""
         print(
             f"ep {epoch:02d}  train {train_loss:.3f}/{train_acc:.3f}  "
-            f"val {val_loss:.3f}/{val_metrics['top1']:.3f}  ({seconds:.1f}s)"
+            f"val {val_loss:.3f}/{val_metrics['top1']:.3f}{real_text}  ({seconds:.1f}s)"
         )
 
         # keep the best epoch, not the last one
@@ -193,6 +251,9 @@ def main():
     # 4. final test with the best checkpoint
     model.load_state_dict(torch.load(checkpoint, map_location=device)["model"])
     test_metrics = evaluate_on_test(model, test, data)
+    if internet_val is not None:
+        real_metrics = evaluate_on_internet_val(model, internet_val, data)
+        test_metrics |= {f"internet_val_{key}": v for key, v in real_metrics.items()}
 
     artifact = wandb.Artifact("shape-cnn", type="model", metadata=test_metrics)
     artifact.add_file(str(checkpoint))
