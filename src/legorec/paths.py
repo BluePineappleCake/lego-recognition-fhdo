@@ -29,6 +29,11 @@ def renders_dir() -> Path:
     return data_dir() / "raw" / "renders" / "dataset"
 
 
+def own_photos_dir() -> Path:
+    """Our own sheet photos, one subfolder per part (see data/README.md)."""
+    return data_dir() / "raw" / "own_photos"
+
+
 def internet_dir() -> Path:
     """Folder of the internet dataset; contains photos/ (and renders/)."""
     return data_dir() / "raw" / "internet"

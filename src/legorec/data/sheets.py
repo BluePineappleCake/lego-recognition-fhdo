@@ -1,8 +1,8 @@
 """Our photos of the capture sheet (template v2): find them and split them.
 
-The folder (data/raw/photos, see data/README.md) has one subfolder per part:
+The folder (data/raw/own_photos, see data/README.md) has one subfolder per part:
 
-    photos/
+    own_photos/
     ├── 3001 brick 2x4/
     │   ├── IMG_3415.jpg
     │   └── ...
