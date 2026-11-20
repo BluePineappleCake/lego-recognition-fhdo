@@ -1,7 +1,7 @@
 """Evaluate shape models on our own photos (single-brick crops).
 
-    python scripts/eval_own.py --data path/to/photos_own_cutout
-    python scripts/eval_own.py --data ... --models models/shape_rydhagpu.pt
+    python scripts/eval_own.py                     # data/raw/own_crops, all models
+    python scripts/eval_own.py --models models/shape_rydhagpu.pt
 
 Only crops of the render classes are used (the model cannot answer the other
 parts). Crops of one photo are not independent (same part, same moment, same
@@ -38,7 +38,7 @@ from legorec.eval.metrics import (
     softmax,
     top1_among,
 )
-from legorec.paths import MODELS_DIR, processed_dir
+from legorec.paths import MODELS_DIR, own_crops_dir, processed_dir
 from legorec.shape.model import ShapeClassifier
 
 
@@ -65,7 +65,9 @@ def evaluate(checkpoint, crops, images, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--data", required=True, help="folder with one subfolder per part"
+        "--data",
+        default=str(own_crops_dir()),
+        help="folder with one subfolder per part (default: data/raw/own_crops)",
     )
     parser.add_argument("--models", nargs="*", default=None)
     args = parser.parse_args()
