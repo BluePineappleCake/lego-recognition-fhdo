@@ -116,6 +116,10 @@ YOLO-seg finds the bricks (one class "brick", see
    `export_yolo.py` uses them instead of the automatic ones.
 4. `yolo segment train data=data/processed/yolo_bricks/data.yaml
    model=yolo26n-seg.yaml imgsz=1024` (needs `pip install -e .[detect]`).
+5. Copy `runs/segment/train/weights/best.pt` to `models/bricks_yolo.pt`.
+   Then `python scripts/find_bricks.py <photo.jpg>` finds the bricks on a
+   sheet photo and names their parts (`legorec.segment.bricks_on_sheet` in
+   code).
 
 ## 3. Rebrickable
 

@@ -5,6 +5,8 @@ LEGOREC_PROCESSED  writable folder for caches, default: $LEGOREC_DATA/processed
                    (on Kaggle /kaggle/input is read-only -> set it to /kaggle/working)
 LEGOREC_SHAPE_MODEL  checkpoint used by legorec.shape.predict,
                    default: <repo>/models/shape.pt
+LEGOREC_BRICK_MODEL  YOLO-seg model that finds the bricks (legorec.segment),
+                   default: <repo>/models/bricks_yolo.pt
 """
 
 import os
@@ -39,3 +41,8 @@ def processed_dir() -> Path:
 def shape_model_path() -> Path:
     """Checkpoint of the shape classifier that the pipeline uses."""
     return Path(os.environ.get("LEGOREC_SHAPE_MODEL", MODELS_DIR / "shape.pt"))
+
+
+def brick_model_path() -> Path:
+    """YOLO-seg model that finds the bricks on a sheet photo."""
+    return Path(os.environ.get("LEGOREC_BRICK_MODEL", MODELS_DIR / "bricks_yolo.pt"))

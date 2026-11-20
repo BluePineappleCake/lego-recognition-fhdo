@@ -191,6 +191,10 @@ Speed: about 5 ms per photo. The test split was evaluated once
   val and test, about one false alarm in 177. Val and test agree, so this is
   not tuned to the 28 val photos.
 - No pretrained weights are needed for this step.
+- In the pipeline (`segment.bricks_on_sheet`, `scripts/find_bricks.py`) a
+  mask that lies more than half inside a surer one is dropped (the extra
+  piece of a long 1×6 brick). With that, YOLO finds exactly 177 bricks on
+  the test split, the same number as `find_bricks` on every test photo.
 - **Not shown yet: that YOLO is better than `find_bricks`.** Apart from 8
   photos, all labels (val and test too) come from `find_bricks` itself, and
   touching bricks occur only on the 2 corrected train photos. The numbers
