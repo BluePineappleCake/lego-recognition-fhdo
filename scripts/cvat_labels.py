@@ -20,25 +20,22 @@ right away.
 """
 
 import argparse
-import csv
 import shutil
 import zipfile
 from pathlib import Path
 
 from legorec.paths import LABELS_DIR, processed_dir
-from legorec.segment.yolo import NAMES
+from legorec.segment.yolo import NAMES, select_photos
 
 FIXED_DIR = LABELS_DIR / "sheets"  # versioned in Git, see data/README.md
 
 
 def pack(data: Path, names: list[str]) -> None:
-    images = {p.stem: p for p in data.glob("images/*/*.jpg")}
-    if not names:
-        with open(data / "review.csv", newline="", encoding="utf-8") as file:
-            names = [row["photo"] for row in csv.DictReader(file)]
-    unknown = [n for n in names if n not in images]
-    if unknown:
-        raise SystemExit(f"not in {data}/images: {unknown}")
+    try:  # no names: the photos of review.csv
+        images = select_photos(data, names or None)
+    except ValueError as error:
+        raise SystemExit(error) from None
+    names = list(images)
 
     out = data / "cvat"
     if out.exists():

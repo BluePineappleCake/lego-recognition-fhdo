@@ -173,14 +173,22 @@ class ShapeClassifier:
         self.real_scale = real_scale or 1.0
 
     @torch.no_grad()
+    def _scores(self, arrays, sizes_px, batch_size=256) -> torch.Tensor:
+        """Preprocessed arrays + sizes -> raw model scores (N x parts), on the CPU."""
+        out = []
+        for start in range(0, len(arrays), batch_size):
+            batch = arrays[start : start + batch_size]
+            images = normalize(torch.from_numpy(np.stack(batch)).unsqueeze(1))
+            sizes_in_render_px = [
+                size * self.real_scale for size in sizes_px[start : start + batch_size]
+            ]
+            z = torch.from_numpy(self.size_norm(sizes_in_render_px))
+            out.append(self.model(images.to(self.device), z.to(self.device)).cpu())
+        return torch.cat(out)
+
     def _top_k(self, arrays, sizes_px, k):
         """Preprocessed arrays + sizes -> for every image the k most likely parts."""
-        images = normalize(torch.from_numpy(np.stack(arrays)).unsqueeze(1))
-        sizes_in_render_px = [size * self.real_scale for size in sizes_px]
-        z = torch.from_numpy(self.size_norm(sizes_in_render_px))
-
-        scores = self.model(images.to(self.device), z.to(self.device))
-        probabilities = scores.softmax(dim=1).cpu()
+        probabilities = self._scores(arrays, sizes_px).softmax(dim=1)
         top_probs, top_indices = probabilities.topk(
             min(k, probabilities.shape[1]), dim=1
         )
@@ -217,3 +225,14 @@ class ShapeClassifier:
         arrays = [array for array, _ in preprocessed]
         sizes = [size for _, size in preprocessed]
         return self._top_k(arrays, sizes, k), arrays, sizes
+
+    def scores(self, images) -> np.ndarray:
+        """Photos with one brick each -> raw scores (N images x parts), the same
+        preprocessing as in training. For evaluations that need every score."""
+        preprocessed = [
+            preprocess_image(image, self.size, contrast=self.contrast)
+            for image in images
+        ]
+        arrays = [array for array, _ in preprocessed]
+        sizes = [size for _, size in preprocessed]
+        return self._scores(arrays, sizes).numpy()

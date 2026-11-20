@@ -24,8 +24,6 @@ size in pixels means nothing here.
 
 import argparse
 import csv
-import math
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -38,48 +36,17 @@ from legorec.data.internet import (
     only_parts,
     render_parts,
 )
-from legorec.eval.metrics import classification_metrics, confused_pairs, error_breakdown
+from legorec.eval.metrics import (
+    classification_metrics,
+    confused_pairs,
+    error_breakdown,
+    group_top1,
+    mcnemar_p,
+    softmax,
+    top1_among,
+)
 from legorec.paths import MODELS_DIR, internet_dir, processed_dir
-from legorec.shape.augment import normalize
 from legorec.shape.model import ShapeClassifier
-from legorec.shape.preprocess import preprocess_image
-
-BATCH_SIZE = 256
-
-
-@torch.no_grad()
-def all_scores(classifier: ShapeClassifier, images: list[Image.Image]) -> np.ndarray:
-    """Scores for all parts (N images x 50), same preprocessing as in training."""
-    scores = []
-    for start in range(0, len(images), BATCH_SIZE):
-        arrays = [
-            preprocess_image(image, classifier.size, contrast=classifier.contrast)[0]
-            for image in images[start : start + BATCH_SIZE]
-        ]
-        x = normalize(torch.from_numpy(np.stack(arrays)).unsqueeze(1))
-        z = torch.zeros(len(arrays))  # unused: size-feature models are skipped
-        out = classifier.model(x.to(classifier.device), z.to(classifier.device))
-        scores.append(out.cpu().numpy())
-    return np.concatenate(scores)
-
-
-def softmax(scores: np.ndarray) -> np.ndarray:
-    exp = np.exp(scores - scores.max(axis=1, keepdims=True))
-    return exp / exp.sum(axis=1, keepdims=True)
-
-
-def mcnemar_p(a_right: np.ndarray, b_right: np.ndarray) -> tuple[int, int, float]:
-    """Exact two-sided McNemar test on paired right/wrong answers.
-
-    Returns (only A right, only B right, p-value).
-    """
-    only_a = int(np.sum(a_right & ~b_right))
-    only_b = int(np.sum(~a_right & b_right))
-    n, k = only_a + only_b, min(only_a, only_b)
-    if n == 0:
-        return only_a, only_b, 1.0
-    p = 2 * sum(math.comb(n, i) for i in range(k + 1)) / 2**n
-    return only_a, only_b, min(1.0, p)
 
 
 def main():
@@ -121,26 +88,16 @@ def main():
 
         parts = classifier.parts
         y = np.array([parts.index(photo.part) for photo in photos])
-        scores = all_scores(classifier, images)
+        scores = classifier.scores(images)
         metrics = classification_metrics(scores, y)
 
         # best guess among the parts that occur in these photos
-        present = sorted({parts.index(photo.part) for photo in photos})
-        masked = np.full_like(scores, -np.inf)
-        masked[:, present] = scores[:, present]
-        metrics["top1_13"] = float(np.mean(masked.argmax(axis=1) == y))
+        present = {parts.index(photo.part) for photo in photos}
+        metrics["top1_13"] = top1_among(scores, y, sorted(present))
 
         # one answer per capture: mean probability over its cameras
-        probabilities = softmax(scores)
-        rows_of_group = defaultdict(list)
-        for i, photo in enumerate(photos):
-            rows_of_group[photo.group].append(i)
         capture_right = np.array(
-            [
-                probabilities[rows_of_group[g]].mean(axis=0).argmax()
-                == y[rows_of_group[g][0]]
-                for g in groups
-            ]
+            list(group_top1(scores, y, [photo.group for photo in photos]).values())
         )
         metrics["capture_top1"] = float(capture_right.mean())
 
@@ -154,7 +111,7 @@ def main():
         with open(out, "w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file, lineterminator="\n")
             writer.writerow(["path", "group", "part", "pred", "prob"])
-            for photo, p, prob in zip(photos, pred, probabilities.max(axis=1)):
+            for photo, p, prob in zip(photos, pred, softmax(scores).max(axis=1)):
                 writer.writerow(
                     [photo.path, photo.group, photo.part, parts[p], f"{prob:.3f}"]
                 )

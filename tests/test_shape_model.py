@@ -51,6 +51,9 @@ def test_shape_classifier_roundtrip(tmp_path):
     assert [p for p, _ in top[0]] and len(top[0]) == 3
     assert abs(sum(c for _, c in top[0]) - 1) < 1e-5
     assert arrays[0].shape == (96, 96) and pxs[0] == 100
+    scores = clf.scores([Image.fromarray(img)])
+    assert scores.shape == (1, len(parts))
+    assert parts[int(scores.argmax())] == top[0][0][0]  # same model, same answer
 
 
 def test_batches_cover_every_sample_once():

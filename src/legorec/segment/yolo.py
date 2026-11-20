@@ -13,6 +13,9 @@ the raw photo: there every photo has the same scale (PX_PER_MM), and the
 pipeline warps anyway before it looks for bricks.
 """
 
+import csv
+from pathlib import Path
+
 import cv2
 import numpy as np
 
@@ -52,3 +55,21 @@ def read_label_file(path) -> list[np.ndarray]:
             if values:
                 polygons.append(np.array(values[1:], float).reshape(-1, 2))
     return polygons
+
+
+def select_photos(data: Path, names: list[str] | None = None) -> dict[str, Path]:
+    """Photos of an exported data set (export_yolo.py): name -> image path.
+
+    `names` None: the photos of review.csv; empty list: all photos.
+    Raises ValueError for a name that is not in the data set.
+    """
+    images = {p.stem: p for p in sorted(Path(data).glob("images/*/*.jpg"))}
+    if names is None:
+        with open(Path(data) / "review.csv", newline="", encoding="utf-8") as file:
+            names = [row["photo"] for row in csv.DictReader(file)]
+    elif not names:
+        names = list(images)
+    unknown = [n for n in names if n not in images]
+    if unknown:
+        raise ValueError(f"not in {data}/images: {unknown}")
+    return {n: images[n] for n in names}
