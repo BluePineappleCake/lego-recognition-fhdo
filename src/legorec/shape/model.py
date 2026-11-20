@@ -33,6 +33,7 @@ import numpy as np
 import torch
 from torch import nn
 
+from legorec.data.renders import canonical_name, canonical_part
 from legorec.shape.augment import normalize
 from legorec.shape.preprocess import preprocess_crop, preprocess_image
 from legorec.types import BrickCrop
@@ -152,8 +153,10 @@ class ShapeClassifier:
         saved = torch.load(checkpoint, map_location=device, weights_only=False)
         config = saved["cfg"]
 
-        self.parts = saved["parts"]  # part numbers in the order of the outputs
-        self.names = saved.get("names", {})  # part number -> readable name
+        # part numbers in the order of the outputs; older checkpoints say "3062"
+        self.parts = [canonical_part(part) for part in saved["parts"]]
+        names = saved.get("names", {})  # part number -> readable name
+        self.names = {canonical_part(p): canonical_name(n) for p, n in names.items()}
         self.size = config["size"]
         self.size_feature = bool(config.get("size_feature", False))
         self.contrast = config.get("contrast", "none")

@@ -75,3 +75,13 @@ def test_csv_roundtrip(tmp_path):
     save_split(assign, f)
     assert load_split(f) == assign
     assert f.read_bytes().endswith(b"\n") and b"\r" not in f.read_bytes()
+
+
+def test_kaggle_3062_is_3062b(tmp_path):
+    # the Kaggle renders show the hollow-stud brick but call it "3062"; the
+    # part must match our photos (3062b), the group must stay as in renders.csv
+    Image.new("L", (4, 4)).save(tmp_path / "3062 Round Brick 1x1 007L.png")
+    [image] = index_renders(tmp_path)
+    assert image.part == "3062b"
+    assert image.name == "3062b Round Brick 1x1"
+    assert image.group == "3062_007"

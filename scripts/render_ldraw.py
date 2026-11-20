@@ -76,8 +76,7 @@ FOLDERS = {
     "3021": "3021 plate 2x3",
     "3022": "3022 plate 2x2",
     "3023": "3023 plate 1x2",
-    "3062": "3062 round brick 1x1",
-    "3062b": "3062 round brick 1x1",
+    "3062b": "3062b round brick 1x1",
     "3622": "3622 brick 1x3",
     "3623": "3623 plate 1x3",
     "3666": "3666 plate 1x6",
@@ -648,8 +647,8 @@ def render_part(
     writer,
 ):
     vertices, triangles, description = load_ldraw(root, part, hires=not args.lowres)
-    label = part.rstrip("abcdefghijklmnopqrstuvwxyz")  # 3062b -> 3062
-    folder = out / FOLDERS.get(part, f"{label} {description.lower()}")
+    # keep the letter: 3062a and 3062b are different parts
+    folder = out / FOLDERS.get(part, f"{part} {description.lower()}")
     folder.mkdir(parents=True, exist_ok=True)
     obj, part_nodes = make_part_object(vertices, triangles, part)
     print(f"[part] {part} ({description}): {len(triangles)} triangles -> {folder}")
@@ -684,11 +683,11 @@ def render_part(
                 azimuth + math.radians(view * rng.uniform(5, 12)),
             )
             set_crop(scene, camera, obj, rng.uniform(0.04, 0.15))
-            name = f"{label}_{colour}_{view}_{pose_id + view}.jpeg"
+            name = f"{part}_{colour}_{view}_{pose_id + view}.jpeg"
             scene.render.filepath = str(folder / name)
             bpy.ops.render.render(write_still=True)
             writer.writerow(
-                [f"{folder.name}/{name}", label, colour, floor, pose_id, view, seed]
+                [f"{folder.name}/{name}", part, colour, floor, pose_id, view, seed]
             )
         manifest.flush()
         print(f"[pose] {part} {pose + 1}/{args.poses}: {colour}")
