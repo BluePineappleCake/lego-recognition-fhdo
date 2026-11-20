@@ -50,7 +50,7 @@ Download the ZIP from the Kaggle page and unzip it into `data/raw/renders/`.
 ## 2. Our photos (fine-tuning and test)
 
 One folder per part, e.g. `3001 brick 2x4/IMG_3415.jpg` (details in 2c).
-Shared as the **private Kaggle dataset `bluepineapplecake/lego-sheet-photos`**:
+Shared as the **private Kaggle dataset `gonsterenjoyer/lego-sheet-photos`**:
 only team members added as collaborators can see it. Everyone needs the same
 photos, because `data/splits/sheets.csv` and `data/labels/sheets/` refer to
 them by name.
@@ -58,7 +58,7 @@ them by name.
 **Download** (once, and again after every new version):
 
 ```
-kaggle datasets download -d bluepineapplecake/lego-sheet-photos -p data/raw/own_photos --unzip
+kaggle datasets download -d gonsterenjoyer/lego-sheet-photos -p data/raw/own_photos --unzip
 ```
 
 **Add photos:** put them into the right part folder (new part: new folder,
@@ -77,7 +77,7 @@ a version.
 **Created once** (by the owner of the dataset):
 
 1. `kaggle datasets init -p data/raw/own_photos`, then set `title` and
-   `id` (`bluepineapplecake/lego-sheet-photos`, no underscores) in
+   `id` (`gonsterenjoyer/lego-sheet-photos`, no underscores) in
    `dataset-metadata.json`
 2. `kaggle datasets create -p data/raw/own_photos --dir-mode zip`
    (private by default)
