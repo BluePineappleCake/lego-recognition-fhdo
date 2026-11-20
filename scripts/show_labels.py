@@ -10,14 +10,13 @@ contact sheet preview/_overview.jpg; open them with any image viewer.
 """
 
 import argparse
-import csv
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from legorec.paths import processed_dir
-from legorec.segment.yolo import read_label_file
+from legorec.segment.yolo import read_label_file, select_photos
 
 COLOUR = (0, 255, 255)  # BGR yellow
 TILE = (540, 620)
@@ -46,17 +45,11 @@ def main():
     args = parser.parse_args()
 
     data = Path(args.data)
-    images = {p.stem: p for p in sorted(data.glob("images/*/*.jpg"))}
-    if args.photos:
-        names = args.photos
-    elif args.all:
-        names = list(images)
-    else:
-        with open(data / "review.csv", newline="", encoding="utf-8") as file:
-            names = [row["photo"] for row in csv.DictReader(file)]
-    unknown = [n for n in names if n not in images]
-    if unknown:
-        raise SystemExit(f"not in {data}/images: {unknown}")
+    try:
+        images = select_photos(data, [] if args.all else args.photos or None)
+    except ValueError as error:
+        raise SystemExit(error) from None
+    names = list(images)
 
     out = data / "preview"
     out.mkdir(exist_ok=True)

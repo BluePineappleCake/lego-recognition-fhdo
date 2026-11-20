@@ -1,6 +1,7 @@
 """Metrics for the shape classifier. Same functions for renders and real photos."""
 
-from collections import Counter
+import math
+from collections import Counter, defaultdict
 
 import numpy as np
 
@@ -57,7 +58,7 @@ def macro_f1(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(f1_per_class))
 
 
-def _softmax(logits: np.ndarray) -> np.ndarray:
+def softmax(logits: np.ndarray) -> np.ndarray:
     """Scores -> probabilities per row (subtracting the max avoids overflow)."""
     exp = np.exp(logits - logits.max(axis=1, keepdims=True))
     return exp / exp.sum(axis=1, keepdims=True)
@@ -75,7 +76,7 @@ def classification_metrics(logits: np.ndarray, y: np.ndarray) -> dict[str, float
     ranking = np.argsort(-logits, axis=1)  # classes sorted from best to worst
     best_guess = ranking[:, 0]
     top_3 = ranking[:, : min(3, n_classes)]
-    probabilities = _softmax(logits)
+    probabilities = softmax(logits)
 
     return {
         "top1": float(np.mean(best_guess == y)),
@@ -105,3 +106,42 @@ def error_breakdown(y, pred, parts: list[str]) -> dict[str, int]:
     length_errors = sum(n for pair, n in pairs.items() if pair in LENGTH_PAIRS)
     all_errors = sum(pairs.values())
     return {"errors_length": length_errors, "errors_other": all_errors - length_errors}
+
+
+def top1_among(logits: np.ndarray, y: np.ndarray, classes) -> float:
+    """Top-1 if the model may only answer one of `classes` (e.g. the parts
+    that occur in a test set): how much of the error is "answered a part that
+    is not there at all"?"""
+    masked = np.full_like(logits, -np.inf)
+    masked[:, list(classes)] = logits[:, list(classes)]
+    return float(np.mean(masked.argmax(axis=1) == y))
+
+
+def group_top1(logits: np.ndarray, y: np.ndarray, groups: list[str]) -> dict[str, bool]:
+    """One answer per group (all cameras of a capture, all crops of a photo):
+    the mean probability over the group's images. Group -> right?
+
+    Images of one group are not independent; counting per group is the honest
+    unit for a significance test (mcnemar_p)."""
+    probabilities = softmax(logits)
+    rows = defaultdict(list)
+    for i, group in enumerate(groups):
+        rows[group].append(i)
+    return {
+        group: bool(probabilities[index].mean(axis=0).argmax() == y[index[0]])
+        for group, index in sorted(rows.items())
+    }
+
+
+def mcnemar_p(a_right: np.ndarray, b_right: np.ndarray) -> tuple[int, int, float]:
+    """Exact two-sided McNemar test on paired right/wrong answers of models A, B.
+
+    Returns (only A right, only B right, p-value).
+    """
+    only_a = int(np.sum(a_right & ~b_right))
+    only_b = int(np.sum(~a_right & b_right))
+    n, k = only_a + only_b, min(only_a, only_b)
+    if n == 0:
+        return only_a, only_b, 1.0
+    p = 2 * sum(math.comb(n, i) for i in range(k + 1)) / 2**n
+    return only_a, only_b, min(1.0, p)

@@ -22,7 +22,6 @@ Size-feature models are skipped: the crops have no common scale yet.
 
 import argparse
 import csv
-import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -30,12 +29,15 @@ import numpy as np
 import torch
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from eval_internet import all_scores, mcnemar_p, softmax
-
 from legorec.data.internet import render_parts
 from legorec.data.own import index_own_crops
-from legorec.eval.metrics import classification_metrics
+from legorec.eval.metrics import (
+    classification_metrics,
+    group_top1,
+    mcnemar_p,
+    softmax,
+    top1_among,
+)
 from legorec.paths import MODELS_DIR, processed_dir
 from legorec.shape.model import ShapeClassifier
 
@@ -50,28 +52,14 @@ def evaluate(checkpoint, crops, images, device):
     classifier = ShapeClassifier(checkpoint, device=device)  # ValueError: size feature
     parts = classifier.parts
     y = np.array([parts.index(crop.part) for crop in crops])
-    scores = all_scores(classifier, images)
+    scores = classifier.scores(images)
     m = classification_metrics(scores, y)
-
-    present = sorted(set(y))
-    masked = np.full_like(scores, -np.inf)
-    masked[:, present] = scores[:, present]
-    m["top1_k"] = float(np.mean(masked.argmax(axis=1) == y))
-
-    probabilities = softmax(scores)
-    rows_of = defaultdict(list)
-    for i, crop in enumerate(crops):
-        rows_of[crop.group].append(i)
-    groups = sorted(rows_of)
-    photo_right = np.array(
-        [
-            probabilities[rows_of[g]].mean(axis=0).argmax() == y[rows_of[g][0]]
-            for g in groups
-        ]
-    )
-    m["photo_top1"] = float(photo_right.mean())
+    m["top1_k"] = top1_among(scores, y, sorted(set(y)))
+    photo_right = group_top1(scores, y, [crop.group for crop in crops])
+    m["photo_top1"] = float(np.mean(list(photo_right.values())))
     pred = scores.argmax(axis=1)
-    return classifier, m, pred, probabilities, y, dict(zip(groups, photo_right))
+    probabilities = softmax(scores)
+    return classifier, m, pred, probabilities, y, photo_right
 
 
 def main():
@@ -181,7 +169,7 @@ def main():
                     ]
                 )
             )
-        label = f"{part} {names.get(part, '')}"[:25]
+        label = names.get(part, part)[:25]
         print(f"  {label:<26}{idx.sum():>5}" + "".join(f"{a:>26.2f}" for a in row))
 
     print("\nTop-1 per session (crops), mean over seeds:")

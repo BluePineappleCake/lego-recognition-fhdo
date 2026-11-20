@@ -2,8 +2,12 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from legorec.data.sheets import index_sheet_photos
-from legorec.segment.yolo import label_line, mask_to_polygon, read_label_file
+from legorec.segment.yolo import (
+    label_line,
+    mask_to_polygon,
+    read_label_file,
+    select_photos,
+)
 
 
 def test_a_rectangle_becomes_a_four_point_polygon(tmp_path):
@@ -25,30 +29,13 @@ def test_an_empty_mask_has_no_polygon():
     assert mask_to_polygon(np.zeros((10, 10), bool)) is None
 
 
-def test_sheet_photos_get_the_part_of_their_top_folder(tmp_path):
-    for rel in ("3001 brick 2x4/IMG_1.jpg", "MIXED 3009+3710/sub/IMG_2.jpg"):
-        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (4, 4)).save(tmp_path / rel)
+def test_select_photos_reads_review_csv_or_takes_all(tmp_path):
+    for split, name in (("train", "a"), ("val", "b")):
+        (tmp_path / "images" / split).mkdir(parents=True)
+        Image.new("RGB", (4, 4)).save(tmp_path / "images" / split / f"{name}.jpg")
+    (tmp_path / "review.csv").write_text("photo,split\nb,val\n")
 
-    photos = {p.group: p for p in index_sheet_photos(tmp_path)}
-
-    assert photos["3001_IMG_1"].part == "3001"
-    assert photos["MIXED_IMG_2"].folder == "MIXED 3009+3710"
-
-
-def test_a_copy_of_a_photo_in_another_folder_is_skipped(tmp_path):
-    for rel in ("3001 brick 2x4/IMG_1.jpg", "lego-real-photos/by_part/3001/IMG_1.jpg"):
-        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (4, 4), "red").save(tmp_path / rel)
-
-    photos = index_sheet_photos(tmp_path)
-
-    assert [p.group for p in photos] == ["3001_IMG_1"]
-
-
-def test_the_upper_case_part_folder_wins_over_a_lower_case_copy(tmp_path):
-    for rel in ("MIXED 3009+3710/IMG_2.jpg", "lego-real-photos/mixed/IMG_2.jpg"):
-        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (4, 4), "blue").save(tmp_path / rel)
-
-    assert [p.group for p in index_sheet_photos(tmp_path)] == ["MIXED_IMG_2"]
+    assert list(select_photos(tmp_path)) == ["b"]
+    assert sorted(select_photos(tmp_path, [])) == ["a", "b"]
+    with pytest.raises(ValueError):
+        select_photos(tmp_path, ["c"])

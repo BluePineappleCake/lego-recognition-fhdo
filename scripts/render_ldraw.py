@@ -213,19 +213,17 @@ def load_ldraw(root: Path, part: str, hires: bool = True):
     return np.array(vertices), np.array(triangles), description
 
 
-def read_colours(root: Path) -> dict[str, tuple[str, bool]]:
-    """LEGO colour name (lower case) -> (hex value, transparent?) from LDConfig.ldr."""
+def read_colours(root: Path) -> dict[str, str]:
+    """LEGO colour name (lower case) -> hex value, from LDConfig.ldr."""
     lines = (root / "LDConfig.ldr").read_text(encoding="utf-8").splitlines()
     colours = {}
     for i, line in enumerate(lines[:-1]):
         lego = re.match(r"0\s+//\s+LEGOID\s+[\d /]+-\s*(.+)$", line.strip())
-        ldraw = re.match(
-            r"0 !COLOUR \S+\s+CODE\s+\d+\s+VALUE\s+(#\w+)(.*)", lines[i + 1]
-        )
+        ldraw = re.match(r"0 !COLOUR \S+\s+CODE\s+\d+\s+VALUE\s+(#\w+)", lines[i + 1])
         if lego and ldraw:
             for name in lego[1].split("/"):
                 key = name.strip().lower().replace("-", " ")
-                colours.setdefault(key, (ldraw[1], "ALPHA" in ldraw[2]))
+                colours.setdefault(key, ldraw[1])
     return colours
 
 
@@ -665,7 +663,7 @@ def render_part(
         if floor == "white":  # a white brick on white paper is invisible in the render
             choices = [c for c in choices if c != "White"]
         colour = rng.choice(choices)
-        hex_value, _ = colour_value(colours, colour)
+        hex_value = colour_value(colours, colour)
         set_colour(part_nodes, hex_value, transparent, rng)
         randomise_camera(camera, rng)
         drop(scene, obj, rng, args.frames)
