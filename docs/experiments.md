@@ -1,7 +1,8 @@
 # Experiment log
 
-What we tried, what came out, and what we concluded. So far all entries are
-about the shape classifier. Newest entries are at the top.
+What we tried, what came out, and what we concluded: the shape classifier
+and, since 2026-11-20, finding the bricks (YOLO-seg). Newest entries are at
+the top.
 
 Full curves, configs and confusion matrices are in W&B (team `lego-fhdo`,
 project `lego-recognition`, link in the [README](../README.md#links)).
@@ -9,6 +10,8 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 
 **Contents:** [Where we stand](#where-we-stand) ·
 [How to read this log](#how-to-read-this-log) ·
+[2026-11-20](#2026-11-20-finding-bricks-with-yolo-seg-one-class-brick) ·
+[2026-11-19](#2026-11-19-shape-models-on-our-own-photos) ·
 [2026-11-18 (2)](#2026-11-18-2-training-with-renders--internet-photos) ·
 [2026-11-18](#2026-11-18-internet-photos-first-large-real-photo-evaluation) ·
 [2026-11-11](#2026-11-11-seeds-0-to-3-for-baseline-and-size-feature) ·
@@ -19,7 +22,7 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 
 ## Where we stand
 
-State after the second entry of 2026-11-18. Please update this section when you add
+State after the entry of 2026-11-20. Please update this section when you add
 an entry.
 
 **What we know**
@@ -50,8 +53,16 @@ an entry.
 7. Adding the internet photos to training (`shape_contrast_internet`) lifts
    internet val from 25.2 % to 93.4 % (3 seeds each) and costs nothing
    measurable on renders (92.2 % vs 92.0 %). Train and val photos come from
-   the same camera rig, so this is an upper bound: whether it helps on our own
-   photos is still open.
+   the same camera rig, so this is an upper bound. On our own photos
+   (2026-11-19): 49 % top-1 per crop vs 13 % for renders only.
+8. The most frequent error on our own photos is a brick vs a plate with the
+   same footprint (15–18 % of all crops): from above the height is hard to
+   see.
+9. Finding the bricks: `find_bricks` with a local background colour no
+   longer finds shadows and light gradients (0 of 175 thrown-away crops). A
+   YOLO-seg model trained from scratch finds every brick of val and test
+   (recall 1.0, test mAP50-95 0.916), but its labels come from `find_bricks`:
+   whether it separates touching bricks better is still open.
 
 **Open**
 
@@ -68,8 +79,12 @@ an entry.
 - [ ] Find out which colours the contrast-stretch gain comes from.
 - [x] Train on renders + `internet/train`, evaluate on `internet/val`.
       → 2026-11-18 (2).
-- [ ] Evaluate the renders-only and the mixed models on our own photos
-      (freeze `test.csv` first). This decides the new default model.
+- [x] Evaluate the renders-only and the mixed models on our own photos.
+      → 2026-11-19 (all photos, exploration; a frozen test session is
+      still missing). The new default model is not set yet.
+- [ ] Class list renders ∪ internet (18 parts), see 2026-11-19.
+- [ ] YOLO vs `find_bricks` on photos with touching bricks and piles
+      (2026-11-20).
 - [ ] Shadows: `brick_mask` counts the shadow as brick. Fix it, then check on
       renders that nothing gets worse (`scripts/check_preprocess.py`).
 - [ ] Size feature on real photos: calibrate `real_scale` (e.g. grey card +
@@ -116,6 +131,131 @@ Code versions in the column *Code*:
 | after #13 | training code simplified, mixed precision removed ([#13](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/13)) |
 | mask2 | robust brick mask, `PREPROCESS_VERSION = "mask2"` ([#14](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/14)) |
 | mask2-pad | current code: the crop square is padded at the image edge instead of shifted ([#18](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/18)). First runs: 2026-11-11. |
+
+## 2026-11-20: Finding bricks with YOLO-seg (one class "brick")
+
+**Question:** Can a YOLO segmentation model, trained by us on our own sheet
+photos, find every brick? It should replace `find_bricks` (colour
+threshold), which returns bricks that touch as one blob. YOLO only finds
+bricks; which part a brick is stays the job of the shape CNN.
+
+**Setup:**
+
+- Photos: our 246 sheet photos in `data/raw/photos/` (the copy in
+  `lego-real-photos/` is skipped as duplicates), warped to the brick area at
+  8 px/mm (1080 × 1240 px). Split by photo, per part 70 / 15 / 15
+  ([`data/splits/sheets.csv`](../data/splits/sheets.csv), fingerprint
+  `3325911c`): 162 / 28 / 56 photos with 515 / 90 / 177 bricks.
+- Labels: drafts from `find_bricks` with the new local background (next
+  section), written by [`scripts/export_yolo.py`](../scripts/export_yolo.py).
+  8 photos corrected by hand in CVAT
+  ([`scripts/cvat_labels.py`](../scripts/cvat_labels.py), stored in
+  `data/labels/sheets/`): 2 with two touching 2×4 bricks, 3 with a white
+  brick on white paper, 3 with a dark brown brick on altrosa paper.
+- Model: `yolo26n-seg.yaml` **from scratch, no COCO weights**, Ultralytics
+  8.4.216, `imgsz=1024`, 100 epochs, everything else default. 8 min on the
+  RTX 4080. Output: `runs/segment/train/weights/best.pt`.
+
+**find_bricks: one background colour vs local background.** The first crops
+(2026-11-16) compared every pixel with one colour, the median of the area's
+border. Light gradients, dark corners and paper texture became "bricks".
+Now the background colour is the median in a 41 × 41 mm window around every
+pixel (`background="local"`, the default; the old method is still there as
+`background="border"` and gives exactly the old crops). Checked against our
+hand-checked crops, all 246 photos:
+
+| | border (old) | local (new) |
+|---|---|---|
+| crops we had thrown away (shadows, gradients) still found | 175 of 175 | 0 of 175 |
+| kept bricks found | – | 594 of 604 |
+| mixed photos with the right number of bricks (`labels_mixed.csv`) | 5 of 7 | 7 of 7 |
+| photos to check by hand (`review.csv`) | 111 | 16 (7 false alarms) |
+
+The 10 "missed" kept bricks were merged with a shadow blob in the old crops;
+the local method finds them on their own. Still weak: bricks that touch
+(one mask), a white brick on white paper (only its shadow is found).
+
+**Result** (`best.pt`, masks; boxes are almost the same):
+
+| Split | Photos | Bricks | Precision | Recall | mAP50 | mAP50-95 |
+|---|---|---|---|---|---|---|
+| val | 28 | 90 | 0.998 | 1.000 | 0.995 | 0.924 |
+| test | 56 | 177 | 0.993 | 1.000 | 0.995 | 0.916 |
+
+Speed: about 5 ms per photo. The test split was evaluated once
+(2026-11-20) and stays frozen until the model is final.
+
+**Conclusion:**
+
+- YOLO finds separated bricks as reliably as `find_bricks`: every brick of
+  val and test, about one false alarm in 177. Val and test agree, so this is
+  not tuned to the 28 val photos.
+- No pretrained weights are needed for this step.
+- **Not shown yet: that YOLO is better than `find_bricks`.** Apart from 8
+  photos, all labels (val and test too) come from `find_bricks` itself, and
+  touching bricks occur only on the 2 corrected train photos. The numbers
+  measure "YOLO does what `find_bricks` does, on separated bricks".
+
+**Open:**
+
+- 10 new sheet photos with touching bricks and small piles, true count by
+  hand. Compare the counting errors of YOLO and `find_bricks`. This decides
+  whether YOLO replaces `find_bricks` in the pipeline.
+- Pipeline: crops for the shape CNN from YOLO masks; check that they look
+  like the crops of `find_bricks` (both include the shadow).
+
+## 2026-11-19: Shape models on our own photos
+
+**Question:** How good are the shape models on our own photos, and does
+training with the internet photos help there too?
+
+**Setup:**
+
+- Data: [`scripts/eval_own.py`](../scripts/eval_own.py) on
+  `photos_own_cutout`: 638 crops from 168 photos (cut with the old
+  `find_bricks`, checked by hand), only the 13 parts that are render classes.
+  6 of our 19 parts (2654, 3009, 3666, 3710, 4073, 6215) are not render
+  classes: the model cannot answer them.
+- All photos, no split yet: an exploration, not the final test.
+- Crops of one photo are not independent (same part, same light): counted per
+  crop and per photo (mean probability over the crops of a photo); McNemar
+  per photo.
+- Models: all checkpoints in `models/` except size feature.
+
+**Result:**
+
+| Variant | Runs | Top-1 per crop | Top-1 per photo |
+|---|---|---|---|
+| renders only, baseline | – | 6 % | 7 % |
+| renders only, contrast stretch | 4 | 13 % | 17 % |
+| renders + internet, contrast stretch | 3 (seeds 0–2) | 49 % | 61 % |
+
+- The 3 seeds of renders + internet are within 0.5 pp of each other;
+  renders + internet vs renders only: p < 0.001 for every seed pair
+  (McNemar per photo).
+- The most frequent errors are a brick and a plate with the same footprint:
+  3003 → 3022 (34), 3004 → 3023 (33), 3001 → 3020 (20); 15–18 % of all
+  crops. If all of them were fixed, top-1 per crop would be 64–67 %.
+- AdaBN (BatchNorm statistics re-estimated on our crops, 2-fold by photo):
+  +1–2 pp, within the noise.
+
+**Conclusion:** Training with the internet photos helps on our own photos as
+well (13 % → 49 % per crop), but half of the bricks are still wrong. The
+largest single error is brick vs plate: on top-down photos the height of a
+brick is hard to see.
+
+**Careful:** most parts were photographed in only one session (one phone).
+A model fine-tuned on these photos could learn the session instead of the
+part; a frozen test set needs a new session with all parts on both phones.
+
+**Open:**
+
+- Class list renders ∪ internet: the internet photos and renders of 2654,
+  3009, 3666, 3710 and 6215 are dropped at the moment (`only_parts` in
+  `load_internet_data`).
+- A/B test: the same bricks from above vs at ~45°, paired per photo; does the
+  brick/plate error go down?
+- Fine-tuning on our own photos, after a frozen test session exists.
 
 ## 2026-11-11: Seeds 0 to 3 for baseline and size feature
 

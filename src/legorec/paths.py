@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # versioned in Git, therefore always relative to the repository
 SPLITS_DIR = REPO_ROOT / "data" / "splits"
+LABELS_DIR = REPO_ROOT / "data" / "labels"  # labels corrected by hand
 MODELS_DIR = REPO_ROOT / "models"
 
 

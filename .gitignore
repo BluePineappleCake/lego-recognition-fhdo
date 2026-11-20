@@ -224,6 +224,7 @@ data/raw/
 data/processed/
 models/
 wandb/
+runs/
 *.pt
 *.pth
 

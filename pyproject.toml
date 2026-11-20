@@ -11,6 +11,7 @@ dependencies = ["numpy", "pandas", "opencv-python", "pyyaml", "pillow"]
 [project.optional-dependencies]
 # torch: install the CUDA build from pytorch.org FIRST (PyPI gives CPU-only on Windows)
 train = ["torch", "torchvision", "timm", "wandb"]
+detect = ["ultralytics"]  # YOLO-seg: finds the bricks (AGPL-3.0)
 app = ["streamlit"]
 docs = ["matplotlib>=3.6"]
 dev = ["pytest", "ruff>=0.17,<0.18", "nbstripout", "pre-commit", "scikit-learn"]
