@@ -1,3 +1,4 @@
+import pytest
 from PIL import Image
 
 from legorec.data.sheets import index_sheet_photos
@@ -30,3 +31,10 @@ def test_the_upper_case_part_folder_wins_over_a_lower_case_copy(tmp_path):
         Image.new("RGB", (4, 4), "blue").save(tmp_path / rel)
 
     assert [p.group for p in index_sheet_photos(tmp_path)] == ["MIXED_IMG_2"]
+
+
+def test_a_typo_in_a_folder_name_is_an_error(tmp_path):
+    (tmp_path / "3001brick 2x4").mkdir()
+    Image.new("RGB", (4, 4)).save(tmp_path / "3001brick 2x4" / "IMG_1.jpg")
+    with pytest.raises(ValueError, match="3001brick"):
+        index_sheet_photos(tmp_path)

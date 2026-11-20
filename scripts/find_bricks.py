@@ -1,6 +1,6 @@
 """Find the bricks on sheet photos and say which part each one is.
 
-    python scripts/find_bricks.py data/raw/photos/MIXED*/IMG_8844.jpg
+    python scripts/find_bricks.py data/raw/own_photos/MIXED*/IMG_8844.jpg
     python scripts/find_bricks.py photo1.jpg photo2.jpg --method threshold
     python scripts/find_bricks.py photo.jpg --shape-model models/shape_rydhagpu.pt
     python scripts/find_bricks.py photo.jpg --no-shape          # only find bricks

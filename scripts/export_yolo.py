@@ -1,7 +1,7 @@
 """Export our sheet photos as a YOLO segmentation data set (one class: brick).
 
     python scripts/export_yolo.py
-    python scripts/export_yolo.py --photos data/raw/photos --background border
+    python scripts/export_yolo.py --photos data/raw/own_photos --background border
 
 For every photo with all 4 ArUco markers:
 
@@ -43,7 +43,7 @@ import cv2
 import numpy as np
 
 from legorec.data.sheets import index_sheet_photos, load_or_create_sheet_split
-from legorec.paths import LABELS_DIR, data_dir, processed_dir
+from legorec.paths import LABELS_DIR, own_photos_dir, processed_dir
 from legorec.segment import brick_area, find_bricks
 from legorec.segment.sheet import PX_PER_MM, is_frame
 from legorec.segment.yolo import NAMES, label_line, mask_to_polygon, read_label_file
@@ -84,7 +84,7 @@ def numbers(flags: list[int]) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--photos", default=str(data_dir() / "raw" / "photos"))
+    parser.add_argument("--photos", default=str(own_photos_dir()))
     parser.add_argument("--out", default=str(processed_dir() / "yolo_bricks"))
     parser.add_argument("--background", default="local", choices=["local", "border"])
     parser.add_argument(

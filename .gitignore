@@ -220,7 +220,13 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Project data and models
-data/raw/
+# data/raw/: only the empty folders (.gitkeep) and the Kaggle metadata of our
+# photos are versioned, never the data itself (see data/README.md)
+data/raw/*
+!data/raw/*/
+data/raw/*/*
+!data/raw/*/.gitkeep
+!data/raw/own_photos/dataset-metadata.json
 data/processed/
 models/
 wandb/
