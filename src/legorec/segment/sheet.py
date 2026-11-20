@@ -24,6 +24,7 @@ PX_PER_MM = 8
 MARKERS_MM = {0: (0, 0), 1: (247, 0), 2: (247, 160), 3: (0, 160)}
 # brick area relative to marker 0 in mm: x from, x to, y from, y to
 AREA_MM = (25, 160, 15, 170)
+FRAME = 0.9  # a blob as wide or high as 90 % of the area is its edge, not a brick
 # window for the local background colour; larger than a brick (2x4: 32 x 16 mm)
 BACKGROUND_WINDOW_MM = 41
 
@@ -122,6 +123,14 @@ def find_bricks(
     return [
         labels == i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_pixels
     ]
+
+
+def is_frame(mask: np.ndarray) -> bool:
+    """The warp is never perfect: a thin line of the paper around the coloured
+    area can survive as one big ring-shaped blob. That is not a brick."""
+    ys, xs = np.nonzero(mask)
+    h, w = mask.shape
+    return (xs.max() - xs.min()) > FRAME * w or (ys.max() - ys.min()) > FRAME * h
 
 
 def cut_bricks(

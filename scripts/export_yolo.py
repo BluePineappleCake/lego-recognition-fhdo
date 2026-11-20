@@ -45,21 +45,12 @@ import numpy as np
 from legorec.data.sheets import index_sheet_photos, load_or_create_sheet_split
 from legorec.paths import LABELS_DIR, data_dir, processed_dir
 from legorec.segment import brick_area, find_bricks
-from legorec.segment.sheet import PX_PER_MM
+from legorec.segment.sheet import PX_PER_MM, is_frame
 from legorec.segment.yolo import NAMES, label_line, mask_to_polygon, read_label_file
 
 BIG = 1.8  # times the median brick of the photo (two touching bricks: about 2)
 RAGGED = 0.75  # real bricks: 95 % have area / hull area >= 0.78
-FRAME = 0.9  # as wide or high as 90 % of the area
 EDGE = 3  # pixels
-
-
-def is_frame(mask: np.ndarray) -> bool:
-    """The warp is never perfect: a thin line of the paper around the coloured
-    area can survive as one big ring-shaped blob. That is not a brick."""
-    ys, xs = np.nonzero(mask)
-    h, w = mask.shape
-    return (xs.max() - xs.min()) > FRAME * w or (ys.max() - ys.min()) > FRAME * h
 
 
 def solidity(polygon: np.ndarray) -> float:
