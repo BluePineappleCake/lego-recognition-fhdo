@@ -11,6 +11,7 @@ data/
 ├── raw/
 │   ├── renders/        Kaggle render dataset (unzipped, unchanged)
 │   ├── own_photos/     our own photos of the capture sheet (Kaggle, section 2)
+│   ├── own_crops/      single-brick crops of them, checked by hand (eval_own.py)
 │   ├── internet/       internet photos and renders (section 2b)
 │   ├── own_renders/    our renders from LDraw (scripts/render_ldraw.py)
 │   ├── labels/         CVAT exports for our photos
@@ -83,6 +84,16 @@ a version.
    (private by default)
 3. on kaggle.com: dataset → Settings → Sharing → add the team's Kaggle
    usernames
+
+## 2a. Crops of our photos (evaluation)
+
+`data/raw/own_crops/<part folder>/IMG_3415_b01.png`: one crop per brick, cut
+from the sheet photos on 2026-11-16 with the first `find_bricks` (one border
+colour), then checked by hand: bad crops were deleted. `labels.csv` lists all
+crops that were first cut; a crop listed there but missing in its folder was
+thrown away. The `.jpg` files are whole photos cropped by hand.
+`scripts/eval_own.py` uses this folder to test shape models on our own photos.
+This hand check cannot be redone, so keep the folder as it is.
 
 ## 2b. Internet photos (extra real data)
 

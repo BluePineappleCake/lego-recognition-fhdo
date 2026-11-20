@@ -2,7 +2,7 @@
 
 The folder looks like this (one crop per brick; the label is the folder):
 
-    photos_own_cutout/
+    data/raw/own_crops/
     ├── 3001 brick 2x4/
     │   ├── IMG_3415_b01.png     crop 1 of photo IMG_3415 (segment.sheet)
     │   ├── IMG_3415_b02.png
@@ -10,7 +10,7 @@ The folder looks like this (one crop per brick; the label is the folder):
     ├── 3009 brick 1x6/
     │   ├── IMG_3480.jpg         a whole photo cropped by hand: one brick
     │   └── ...
-    └── labels.csv               (not read here)
+    └── labels.csv               all crops first cut, also the ones thrown away
 
 All crops of one photo show bricks of the same part, taken at the same moment
 with the same light. So they are not independent: we split and count by
