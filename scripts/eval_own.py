@@ -23,23 +23,23 @@ To compare the two on the same photos: --source crops --split test.
 --size-prior (yolo / threshold): also weigh the measured size of every brick
 in mm (legorec.shape.size_prior). Run once with and once without it.
 
-Only crops of parts that every evaluated model knows are used (13 for the
-Kaggle models; pass --models to evaluate one model on all of its parts). Crops of one photo are not independent (same part, same moment, same
-light), so the honest numbers are per photo:
+Only crops of parts that every evaluated model knows are used (pass --models
+to evaluate one model on all of its parts). Crops of one photo are not
+independent (same part, same moment, same light), so the honest numbers are
+per photo:
 
-    top1 / top3 / mF1 / conf   per crop, 50-way, as for the renders
+    top1 / top3 / mF1 / conf   per crop, all parts of the model, as for the renders
     top1_k        best guess among the k parts that occur in these crops only
     photo_top1    one answer per photo: mean probability over its crops
 
-Models are grouped into variants by their config (tags + contrast); the table
+Models are grouped into variants by the tags of their config; the table
 shows mean and range over the seeds of a variant. Then per part and per
 session, and an exact McNemar test per photo between seed-matched models of
 two variants.
 
 Predictions: $LEGOREC_PROCESSED/eval_own_<model>.csv (eval_own_<source>_<model>.csv
 for yolo / threshold).
-Models trained with the size feature (Kaggle renders only) are skipped: they
-need the brick size in render pixels, which our photos do not give.
+Older models that need the Git tag v1-legacy are skipped.
 """
 
 import argparse
@@ -62,15 +62,19 @@ from legorec.eval.metrics import (
     top1_among,
 )
 from legorec.paths import MODELS_DIR, own_crops_dir, own_photos_dir, processed_dir
-from legorec.shape.model import ShapeClassifier, load_checkpoint, parts_known_by_all
+from legorec.shape.model import (
+    ShapeClassifier,
+    load_checkpoint,
+    parts_known_by_all,
+    usable_checkpoints,
+)
 from legorec.shape.size_prior import SizePrior
 
 
 def variant_and_seed(checkpoint: Path) -> tuple[str, int]:
     cfg = load_checkpoint(checkpoint)["cfg"]
-    tags = [t for t in cfg.get("tags") or [] if t != "contrast"]
-    tags = "+".join(tags + ["size"] * bool(cfg.get("size_feature")))
-    return f"{tags or 'untagged'}/{cfg.get('contrast') or 'none'}", cfg.get("seed")
+    tags = [t for t in cfg.get("tags") or [] if t not in ("contrast", "yolo-mask")]
+    return "+".join(tags) or "untagged", cfg.get("seed")
 
 
 def sheet_photos_per_split():
@@ -149,7 +153,6 @@ def sheet_crops(method, split, known):
 
 
 def evaluate(checkpoint, crops, inputs, device, size_prior=None):
-    # ValueError for a size-feature model (no real_scale)
     classifier = ShapeClassifier(checkpoint, device=device, size_prior=size_prior)
     parts = classifier.parts
     y = np.array([parts.index(crop.part) for crop in crops])
@@ -198,12 +201,8 @@ def main():
         parser.error("--size-prior needs a sheet source (yolo / threshold)")
     size_prior = SizePrior.load() if args.size_prior else None
 
-    checkpoints = (
-        [Path(p) for p in args.models]
-        if args.models
-        else sorted(
-            MODELS_DIR.glob("shape_*.pt")  # shape.pt is a copy of one of them
-        )
+    checkpoints = usable_checkpoints(
+        args.models or sorted(MODELS_DIR.glob("shape_*.pt"))  # shape.pt: a copy
     )
     known = parts_known_by_all(checkpoints)
     if args.source == "crops":
@@ -225,13 +224,9 @@ def main():
     results = {}  # run -> dict
     for checkpoint in checkpoints:
         run = checkpoint.stem.removeprefix("shape_")
-        try:
-            classifier, m, pred, prob, y, photo_right = evaluate(
-                checkpoint, crops, inputs, device, size_prior
-            )
-        except ValueError:
-            print(f"[skip] {run}: size-feature model")
-            continue
+        classifier, m, pred, prob, y, photo_right = evaluate(
+            checkpoint, crops, inputs, device, size_prior
+        )
         variant, seed = variant_and_seed(checkpoint)
         results[run] = {
             "variant": variant,

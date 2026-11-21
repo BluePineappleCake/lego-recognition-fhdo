@@ -9,7 +9,6 @@ Versioned are `data/splits/`, `data/labels/` and `data/reference/`.
 ```
 data/
 ├── raw/
-│   ├── renders/        Kaggle renders, only for older models (section 1)
 │   ├── own_photos/     our own photos of the capture sheet (Kaggle, section 2)
 │   ├── own_crops/      single-brick crops of them, checked by hand (eval_own.py)
 │   ├── own_single_photos/  our photos of single bricks, not on the sheet (2a)
@@ -25,33 +24,13 @@ data/
 Rule: `raw/` is never edited by hand or by code. Everything derived goes
 into `processed/` and must be reproducible from `raw/` with a script.
 
-## 1. Kaggle renders (older models only)
+## 1. Kaggle renders (no longer used)
 
-Not needed for the team's model (`configs/shape_internet_own.yaml`, trained on
-sections 2b and 2d). Only the older configs (`shape_baseline`,
-`shape_contrast`, `shape_size_feature`, `shape_contrast_internet`) and their
-models with 50 classes use them.
-
-Source: [Images of LEGO Bricks](https://www.kaggle.com/datasets/joosthazelzet/lego-brick-images)
-by J. Hazelzet (40,000 images, 50 part types).
-
-**Option A: Kaggle CLI**
-
-1. Create an API token on kaggle.com → Settings → API → *Create New Token*
-2. Put the downloaded `kaggle.json` into `~/.kaggle/`
-   (Windows: `C:\Users\<you>\.kaggle\`)
-3. Run from the repo root:
-
-```bash
-pip install kaggle
-kaggle datasets download -d joosthazelzet/lego-brick-images -p data/raw/renders --unzip
-```
-
-**Option B: manual**
-Download the ZIP from the Kaggle page and unzip it into `data/raw/renders/`.
-
-**On Kaggle Notebooks** nothing needs downloading: add the dataset via
-*Add Input*, it appears under `/kaggle/input/`.
+The first models were trained on the Kaggle set
+[Images of LEGO Bricks](https://www.kaggle.com/datasets/joosthazelzet/lego-brick-images)
+(J. Hazelzet, 40,000 renders of 50 parts). The code for it, its split
+`data/splits/renders.csv` and the old configs are in the Git tag `v1-legacy`.
+The folder `data/raw/renders/` can be deleted.
 
 ## 2. Our photos (fine-tuning and test)
 
@@ -126,34 +105,18 @@ hollow-stud brick, our `3062b round brick 1x1`). The folder names are the
 same as in `data/raw/own_photos/` (without `MIXED …` and 4073).
 
 - `photos/<part folder>/`: 3,683 real photos of 18 parts, one brick per
-  image, tightly cropped. 13 parts are among the 50 Kaggle classes; the other
-  5 (2654, 3009, 3666, 3710, 6215) are not.
+  image, tightly cropped.
 - `renders/<part folder>/`: ~43,000 coloured renders of 17 of these parts (no
   3062b), tightly cropped. Some folders also hold mould variants under their
   own number (3065 and 93792 in `3004 brick 1x2`, 30071 in `3005 brick 1x1`,
-  ...): they count as the folder's part (code: `legorec.data.cut_renders`).
+  ...): they count as the folder's part (code: `legorec.data.renders`).
 - The label is the folder name. A file name like
   `c1_5_pcsp_original_3001_1609710513579.jpg` means camera 1 of capture
   `5_pcsp_original_3001_1609710513579`: all cameras of a capture show the
   same brick at the same moment.
-- Tightly cropped: the brick size in pixels says nothing about the real
-  size, so do not use `size_feature` with these photos.
 
 Code: `legorec.data.internet`. The split file `data/splits/internet.csv` is
 in Git; a missing capture is an error, so copy the folders completely.
-
-## 2d. Our renders (training data)
-
-`data/raw/own_renders/<part folder>/`: renders made by us with Blender and
-the LDraw part library (`scripts/render_ldraw.py`, see its docstring), for
-parts the internet set lacks or has few of: 3005, 3062b, 4073, 2,000 each so
-far, plus `renders_manifest.csv`. Same file names as the internet renders
-(`3005_Aqua_0_3000100000.jpeg`); the part number in the name must match the
-folder. New renders are added to `data/splits/own_renders.csv` at the next
-training start.
-
-Not shared yet: ask David for the folder, or render them yourself (a few
-hours on a GPU; the poses differ, so the split file gets new entries).
 
 ## 2c. Sheet photos and YOLO labels (finding bricks)
 
@@ -186,6 +149,19 @@ YOLO-seg finds the bricks (one class "brick", see
    sheet photo and names their parts (`legorec.segment.bricks_on_sheet` in
    code).
 
+## 2d. Our renders (training data)
+
+`data/raw/own_renders/<part folder>/`: renders made by us with Blender and
+the LDraw part library (`scripts/render_ldraw.py`, see its docstring), for
+parts the internet set lacks or has few of: 3005, 3062b, 4073, 2,000 each so
+far, plus `renders_manifest.csv`. Same file names as the internet renders
+(`3005_Aqua_0_3000100000.jpeg`); the part number in the name must match the
+folder. New renders are added to `data/splits/own_renders.csv` at the next
+training start.
+
+Not shared yet: ask David for the folder, or render them yourself (a few
+hours on a GPU; the poses differ, so the split file gets new entries).
+
 ## 3. Rebrickable
 
 Download from https://rebrickable.com/downloads/ into `data/raw/rebrickable/`:
@@ -193,19 +169,18 @@ Download from https://rebrickable.com/downloads/ into `data/raw/rebrickable/`:
 
 ## Splits
 
-`data/splits/renders.csv` assigns every render **pose** to `train`, `val` or
-`test` (80 / 10 / 10 %, stratified per part). Each pose exists twice (cameras
-L and R); both views always share a split, otherwise near-copies of training
-images end up in the test set. Never regenerate this file: all render results
-are only comparable on the same split.
+Every split file maps a **group** to `train`, `val` or `test`. A group is a
+set of images that must share a split, otherwise near-copies of training
+images end up in the test set (code: `legorec.data.splits`). Never
+regenerate a split file: results are only comparable on the same split.
 
 `data/splits/internet.csv` assigns every **capture** of the internet photos
 to `train`, `val` or `test` (70 / 15 / 15 %, stratified per part, all 18
 parts). All cameras of one capture share a split. Never regenerate it either.
 
 `data/splits/internet_renders.csv` and `data/splits/own_renders.csv` assign
-every render **pose** (part + id in the file name) to `train`, `val` or `test`
-(80 / 10 / 10 %). New renders in `own_renders/` are added to the file when
+every render **pose** (part + id in the file name; all colours of a pose) to
+`train`, `val` or `test` (80 / 10 / 10 %). New renders in `own_renders/` are added to the file when
 training starts (by a hash of their name); renders already in it never move.
 Commit the file afterwards.
 
@@ -236,9 +211,6 @@ On Kaggle the input folder is read-only, so set both:
 ```python
 import os
 
-os.environ["LEGOREC_DATA"] = "/kaggle/input"
+os.environ["LEGOREC_DATA"] = "/kaggle/input/<our dataset>"  # contains raw/
 os.environ["LEGOREC_PROCESSED"] = "/kaggle/working/processed"
 ```
-
-The render folder on Kaggle does not follow our layout; pass it directly:
-`--data /kaggle/input/datasets/joosthazelzet/lego-brick-images/dataset`.

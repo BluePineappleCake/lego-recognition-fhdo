@@ -9,7 +9,7 @@ The folder (see data/README.md, section 2b) looks like this:
     │   │   ├── c1_5_pcsp_original_3001_1609710513579.jpg
     │   │   └── ...
     │   └── ...
-    └── renders/        (not used here yet)
+    └── renders/        legorec.data.renders
 
 The label comes from the folder name ("3001 brick 2x4" -> part "3001"), not
 from the file name: some file names contain no part number at all.
@@ -18,24 +18,23 @@ The photos were taken with a rig of several cameras. "c0_..." and "c1_..."
 with the same rest of the name show the same brick at the same moment from
 different angles. If one were in training and the other in the test set, the
 test would be far too easy. So we split by capture ("group" below), not by
-image - the same idea as camera L / R for the renders.
+image.
 
-The split covers all 18 parts of the dataset, also the 5 that are not in our
-50 render classes. Filter with only_parts() when loading, so the split file
-never has to change when we later use more parts.
+The split covers all 18 parts in the folder. Filter with only_parts() when
+loading, so the split file never has to change when we later use more parts.
 """
 
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from legorec.data.renders import load_or_create_split
+from legorec.data.splits import load_or_create_split
 from legorec.paths import SPLITS_DIR
 
 SPLIT_FILE = SPLITS_DIR / "internet.csv"
 
-# 70 / 15 / 15: val and test get more than for the renders, because there are
-# only 16 to 152 captures per part (renders: 800 poses per part)
+# 70 / 15 / 15: val and test get more than for the renders (80 / 10 / 10),
+# because there are only 16 to 152 captures per part
 SPLIT_FRACTIONS = (0.7, 0.15, 0.15)
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}

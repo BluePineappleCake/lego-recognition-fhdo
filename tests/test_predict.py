@@ -4,18 +4,18 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from legorec.shape import predict as shape_predict
-from legorec.shape.model import SizeNorm, SmallCNN, save_checkpoint
+from legorec.shape.model import SmallCNN, save_checkpoint
 from legorec.types import BrickCrop
 
 PARTS = ["3001", "3002", "3003"]
 
 
-def _save_tiny_checkpoint(path, size_feature=False):
+def _save_tiny_checkpoint(path):
     """An untrained model, saved the same way as by scripts/train_shape.py."""
-    model = SmallCNN(len(PARTS), width=8, size_feature=size_feature)
-    config = {"size": 96, "width": 8, "dropout": 0.3, "size_feature": size_feature}
+    model = SmallCNN(len(PARTS), width=8)
+    config = {"size": 96, "width": 8, "dropout": 0.3}
     names = {p: f"brick {p}" for p in PARTS}
-    save_checkpoint(path, model, PARTS, names, config, "test", SizeNorm(5.0, 0.3))
+    save_checkpoint(path, model, PARTS, names, config, "test")
     return path
 
 
@@ -58,16 +58,6 @@ def test_model_is_loaded_only_once(tmp_path, monkeypatch):
     assert shape_predict._classifier is first
 
 
-def test_size_model_needs_real_scale(tmp_path):
-    checkpoint = _save_tiny_checkpoint(tmp_path / "size.pt", size_feature=True)
-    with pytest.raises(ValueError):
-        shape_predict.load_model(checkpoint)
-
-    shape_predict.load_model(checkpoint, real_scale=1.0, device="cpu")
-    part, _ = shape_predict.predict(_crop_with_two_bricks())
-    assert part in PARTS
-
-
 def test_missing_model_gives_a_helpful_error(tmp_path, monkeypatch):
     monkeypatch.setenv("LEGOREC_SHAPE_MODEL", str(tmp_path / "does_not_exist.pt"))
     with pytest.raises(FileNotFoundError, match="LEGOREC_SHAPE_MODEL"):
@@ -94,7 +84,7 @@ def test_checkpoint_of_a_real_run_loads_without_pickled_code(tmp_path):
     path = tmp_path / "run.pt"
     names = {p: f"brick {p}" for p in PARTS}
     config = asdict(TrainConfig(width=8))
-    save_checkpoint(path, model, PARTS, names, config, "test", SizeNorm(5.0, 0.3))
+    save_checkpoint(path, model, PARTS, names, config, "test")
     assert load_checkpoint(path)["cfg"] == config
 
 

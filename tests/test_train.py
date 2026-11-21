@@ -5,16 +5,16 @@ torch = pytest.importorskip("torch")
 
 from legorec.paths import REPO_ROOT
 from legorec.shape.loaders import Batches
-from legorec.shape.model import SizeNorm, SmallCNN
+from legorec.shape.model import SmallCNN
 from legorec.shape.train import TrainConfig, evaluate, overfit_one_batch, train_epoch
 
 
 def test_config_file_overrides_defaults(tmp_path):
     path = tmp_path / "config.yaml"
-    path.write_text("width: 16\nsize_feature: true\n", encoding="utf-8")
+    path.write_text("width: 16\nhflip: true\n", encoding="utf-8")
     # None = option not given on the command line, keep the file/default value
     config = TrainConfig.from_yaml(path, seed=3, epochs=None)
-    assert (config.width, config.size_feature, config.seed) == (16, True, 3)
+    assert (config.width, config.hflip, config.seed) == (16, True, 3)
     assert config.epochs == TrainConfig().epochs
 
 
@@ -22,6 +22,14 @@ def test_typo_in_config_file_is_an_error(tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text("epoch: 5\n", encoding="utf-8")
     with pytest.raises(ValueError, match="epoch"):
+        TrainConfig.from_yaml(path)
+
+
+def test_removed_settings_are_an_error(tmp_path):
+    # old configs (size_feature, contrast, mask, Kaggle) need the tag v1-legacy
+    path = tmp_path / "config.yaml"
+    path.write_text("size_feature: false\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="size_feature"):
         TrainConfig.from_yaml(path)
 
 
@@ -35,9 +43,8 @@ def test_all_config_files_in_the_repo_are_valid():
 def _random_batches(n=32, batch_size=8, shuffle=True):
     rng = np.random.default_rng(0)
     x = rng.integers(0, 256, (n, 32, 32), dtype=np.uint8)
-    z = rng.normal(size=n).astype(np.float32)
     y = rng.integers(0, 3, n)
-    return Batches(x, z, y, "cpu", batch_size, shuffle)
+    return Batches(x, y, "cpu", batch_size, shuffle)
 
 
 def _optimizer_and_schedule(model, steps):
@@ -48,14 +55,13 @@ def _optimizer_and_schedule(model, steps):
 
 def test_one_epoch_and_evaluation_run():
     torch.manual_seed(0)
-    model = SmallCNN(3, width=8, size_feature=True)
+    model = SmallCNN(3, width=8)
     batches = _random_batches()
     optimizer, scheduler = _optimizer_and_schedule(model, len(batches))
-    config = TrainConfig(size_feature=True)
     loss_fn = torch.nn.CrossEntropyLoss()
 
     loss, accuracy = train_epoch(
-        model, batches, optimizer, scheduler, loss_fn, config, SizeNorm(0.0, 1.0)
+        model, batches, optimizer, scheduler, loss_fn, TrainConfig()
     )
     assert np.isfinite(loss) and 0 <= accuracy <= 1
 
@@ -75,7 +81,6 @@ def test_model_can_memorise_one_batch():
         scheduler,
         torch.nn.CrossEntropyLoss(),
         TrainConfig(),
-        SizeNorm(0.0, 1.0),
     )
     assert loss < 0.1
 
@@ -83,16 +88,16 @@ def test_model_can_memorise_one_batch():
 def test_photos_are_repeated_and_appended():
     from legorec.shape.train import TrainData, combine_train
 
-    renders = (np.zeros((5, 4, 4), np.uint8), np.ones(5, np.float32), [0] * 5)
-    photos = (np.full((2, 4, 4), 7, np.uint8), np.zeros(2, np.float32), [1, 2])
+    renders = (np.zeros((5, 4, 4), np.uint8), [0] * 5)
+    photos = (np.full((2, 4, 4), 7, np.uint8), [1, 2])
     sources = {
         "internet_renders": {"train": renders},
         "internet_photos": {"train": photos},
     }
-    data = TrainData(sources, ["a", "b", "c"], {}, SizeNorm(0.0, 1.0), {})
-    x, z, y = combine_train(data, ["internet_renders", "internet_photos"], repeat=3)
+    data = TrainData(sources, ["a", "b", "c"], {}, {})
+    x, y = combine_train(data, ["internet_renders", "internet_photos"], repeat=3)
 
-    assert x.shape == (11, 4, 4) and z.shape == (11,) and len(y) == 11
+    assert x.shape == (11, 4, 4) and len(y) == 11
     assert y == [0] * 5 + [1, 2] * 3
     assert (x[5:] == 7).all() and (x[:5] == 0).all()
 
@@ -107,11 +112,9 @@ def test_missing_internet_folder_is_skipped(tmp_path):
 @pytest.mark.parametrize(
     "settings",
     [
-        {"train_on": ["kaggle"]},  # typo in a source
-        {"train_on": ["internet_renders"], "size_feature": True},
+        {"train_on": ["kaggle_renders"]},  # removed source
         {"train_on": ["internet_renders", "own_photos"]},  # which parts?
         {"train_on": ["internet_renders"], "own_photo_parts": ["4073"]},
-        {"train_on": ["internet_renders"], "classes_from": ["kaggle_renders"]},
         {"train_on": ["internet_renders"], "select_on": "own_renders"},
     ],
 )
@@ -140,13 +143,25 @@ def _write_renders(root, files):
         Image.fromarray(image).save(path)
 
 
+def _no_yolo(monkeypatch):
+    """Training images get their mask from YOLO; in tests nothing is found, so
+    every image takes the brick_mask route (no model file needed)."""
+    from legorec.segment import bricks
+
+    monkeypatch.setattr(bricks, "brick_model_id", lambda model=None: "test")
+    monkeypatch.setattr(
+        bricks, "single_brick_masks", lambda images, *a, **k: [None] * len(images)
+    )
+
+
 def test_classes_come_from_the_training_sources(tmp_path, monkeypatch):
-    from legorec.data import cut_renders
+    from legorec.data import renders
     from legorec.shape.train import load_training_data
 
+    _no_yolo(monkeypatch)
     monkeypatch.setenv("LEGOREC_PROCESSED", str(tmp_path / "cache"))
     monkeypatch.setattr(
-        cut_renders,
+        renders,
         "SPLIT_FILES",
         {s: tmp_path / f"{s}.csv" for s in ("internet_renders", "own_renders")},
     )
@@ -170,6 +185,7 @@ def test_classes_come_from_the_training_sources(tmp_path, monkeypatch):
 
     assert data.parts == ["3001", "3005", "4073"]
     assert set(data.sources) == {"internet_renders", "own_renders"}  # no photos/
-    n = sum(len(split[2]) for split in data.sources["own_renders"].values())
-    assert n == 20 and set(data.sources["own_renders"]["train"][2]) == {2}
+    n = sum(len(split[1]) for split in data.sources["own_renders"].values())
+    assert n == 20 and set(data.sources["own_renders"]["train"][1]) == {2}
     assert (tmp_path / "own_renders.csv").exists()
+    assert list((tmp_path / "cache").glob("own_renders_train_*_yolotest.npz"))
