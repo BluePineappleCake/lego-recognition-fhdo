@@ -3,7 +3,7 @@
 LEGOREC_DATA       root of the (unversioned) data folder, default: <repo>/data
 LEGOREC_PROCESSED  writable folder for caches, default: $LEGOREC_DATA/processed
                    (on Kaggle /kaggle/input is read-only -> set it to /kaggle/working)
-LEGOREC_SHAPE_MODEL  checkpoint used by legorec.shape.predict,
+LEGOREC_SHAPE_MODEL  checkpoint of load_classifier (legorec.shape.classifier),
                    default: <repo>/models/shape.pt
 LEGOREC_BRICK_MODEL  YOLO-seg model that finds the bricks (legorec.segment),
                    default: <repo>/models/bricks_yolo.pt

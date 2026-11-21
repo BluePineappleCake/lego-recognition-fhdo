@@ -49,8 +49,8 @@ from legorec.data.sheets import index_sheet_photos, load_or_create_sheet_split
 from legorec.paths import LABELS_DIR, brick_model_path, own_photos_dir, processed_dir
 from legorec.segment import brick_area
 from legorec.segment.bricks import brick_masks
+from legorec.segment.labels import NAMES, label_line, mask_to_polygon, read_label_file
 from legorec.segment.sheet import PX_PER_MM
-from legorec.segment.yolo import NAMES, label_line, mask_to_polygon, read_label_file
 
 BIG = 1.8  # times the median brick of the photo (two touching bricks: about 2)
 RAGGED = 0.75  # real bricks: 95 % have area / hull area >= 0.78

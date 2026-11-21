@@ -1,19 +1,14 @@
-"""Turn an image of one brick into the input of the shape classifier.
+"""Turn one brick into the input of the shape classifier.
 
-The steps, in this order:
+    preprocess_crop(crop) -> uint8 array 96 x 96
 
-    1. find the brick       (a mask: which pixels belong to the brick?)
-    2. convert to grey      (the classifier only looks at the shape)
-    3. stretch the contrast inside the brick, background a fixed grey
-    4. cut out a square around the brick and resize it to 96 x 96 pixels
+A BrickCrop is an image plus a mask that says which pixels are the brick. It
+comes from a sheet photo (legorec.segment.bricks_on_sheet) or from an image
+with one brick (legorec.segment.single, the training images). The steps:
 
-Where the mask in step 1 comes from:
-
-    preprocess_crop     a brick cut out by the segmentation: its YOLO mask
-    preprocess_images   images with one brick each (renders, internet photos):
-                        YOLO finds the brick, as on our sheet photos; where it
-                        finds nothing, brick_mask
-    preprocess_image    brick_mask: colour distance to the image border
+    1. convert to grey      (the classifier only looks at the shape)
+    2. stretch the contrast inside the brick, background a fixed grey
+    3. cut out a square around the brick and resize it to 96 x 96 pixels
 
 Renders and real photos go through the same code. If they were preprocessed
 differently, we would measure that difference instead of the render-to-real gap.
@@ -36,106 +31,24 @@ DEFAULT_MARGIN = 0.08  # free space around the brick: 8 % of its size per side
 BACKGROUND = 128  # grey value of everything outside the brick
 
 
-def preprocess_image(
-    img: Image.Image | np.ndarray,
-    size: int = DEFAULT_SIZE,
-    margin: float = DEFAULT_MARGIN,
-    thr: float = 12.0,
+def preprocess_crop(
+    crop: BrickCrop, size: int = DEFAULT_SIZE, margin: float = DEFAULT_MARGIN
 ) -> np.ndarray:
-    """A photo or render with one brick on a plain background, mask from
-    brick_mask. Returns a uint8 array size x size.
+    """One BrickCrop (image + mask of the brick) -> uint8 array size x size.
 
-    Example: preprocess_image(Image.open("3001.jpg")) -> array 96 x 96
+    The segmentation provides the mask. Pixels outside it (e.g. a neighbouring
+    brick) become the plain background, so the result looks like a single
+    brick on a plain background.
     """
-    grey = _to_grey(img)
-    mask = brick_mask(_to_rgb(img), thr)
-    if not mask.any():
-        # nothing stands out from the background: use the whole image
+    mask = np.asarray(crop.mask, dtype=bool)
+    grey = _to_grey(crop.image)
+    if not mask.any():  # nothing found: the whole image, as it is
         return _resize_whole_image(grey, size)
     return _cut_out_square(_stretch_contrast(grey, mask), mask, size, margin)
 
 
-def preprocess_images(images, size: int = DEFAULT_SIZE) -> tuple[list[np.ndarray], int]:
-    """Many images with one brick each -> (arrays, number of images where YOLO
-    found nothing and brick_mask was used).
-
-    YOLO finds the brick (one batch for all images), then preprocess_crop,
-    exactly as for the crops of a sheet photo.
-    """
-    if not images:
-        return [], 0
-    from legorec.segment.bricks import single_brick_masks  # needs ultralytics
-
-    rgbs = [_to_rgb(image) for image in images]
-    arrays, fallbacks = [], 0
-    for rgb, yolo_mask in zip(rgbs, single_brick_masks(rgbs)):
-        if yolo_mask is None:
-            arrays.append(preprocess_image(rgb, size))
-            fallbacks += 1
-        else:
-            h, w = yolo_mask.shape
-            arrays.append(
-                preprocess_crop(BrickCrop(rgb, yolo_mask, (0, 0, w, h)), size)
-            )
-    return arrays, fallbacks
-
-
-def preprocess_crop(
-    crop: BrickCrop, size: int = DEFAULT_SIZE, margin: float = DEFAULT_MARGIN
-) -> np.ndarray:
-    """A brick that the segmentation step has already cut out of a photo.
-
-    The segmentation provides the mask. Pixels outside it (e.g. a neighbouring
-    brick) become the plain background, so the result looks like a single
-    brick on a plain background. Returns a uint8 array size x size.
-    """
-    mask = np.asarray(crop.mask, dtype=bool)
-    if not mask.any():
-        # empty mask: find the brick ourselves
-        return preprocess_image(crop.image, size, margin)
-    grey = _stretch_contrast(_to_grey(crop.image), mask)
-    return _cut_out_square(grey, mask, size, margin)
-
-
-def brick_mask(rgb: np.ndarray, thr: float = 12.0) -> np.ndarray:
-    """Step 1: RGB image (H, W, 3) -> True for every pixel of the brick.
-
-    Idea: the image border shows the background, and everything whose colour
-    is clearly different from it belongs to the brick.
-
-    1. Colour distance in the Lab colour space instead of grey values:
-       a white brick on blue card is easy to separate in colour, but in grey
-       both can have almost the same brightness.
-    2. "Closing" fills small holes and gaps, e.g. from bright highlights on
-       the studs that look like background.
-    3. Only the largest connected region counts: a stripe at the image edge,
-       crumbs or dust are smaller and are dropped.
-
-    `thr`: minimum colour distance to the background, in OpenCV's 8-bit Lab
-    units. OpenCV scales L to 0..255, so a difference in lightness counts about
-    2.5 times more than in standard Lab. Returns an all-False mask if nothing
-    stands out from the background.
-    """
-    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
-    background_colour = np.median(_border_pixels(lab), axis=0)
-    colour_distance = np.linalg.norm(lab - background_colour, axis=2)
-    mask = (colour_distance > thr).astype(np.uint8)
-
-    kernel = _odd_kernel(int(0.02 * max(mask.shape)))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-    # OpenCV gives label 0 to the background, the regions get 1, 2, ...
-    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
-    if n_labels <= 1:
-        return np.zeros(mask.shape, dtype=bool)
-
-    region_areas = stats[1:, cv2.CC_STAT_AREA]
-    largest_label = 1 + int(np.argmax(region_areas))
-    return labels == largest_label
-
-
 def _stretch_contrast(grey, mask) -> np.ndarray:
-    """Step 3: spread the grey values inside the brick over the full range
+    """Step 2: spread the grey values inside the brick over the full range
     0..255, so a red brick is no longer almost black and a yellow one no longer
     almost white. Example: if the brick only uses grey values 40..90, 40
     becomes 0 and 90 becomes 255. The 2nd and 98th percentile are used instead
@@ -162,7 +75,7 @@ def _stretch_contrast(grey, mask) -> np.ndarray:
 
 
 def _cut_out_square(grey, mask, size, margin) -> np.ndarray:
-    """Step 4: square around the brick (plus margin), resized to size x size,
+    """Step 3: square around the brick (plus margin), resized to size x size,
     as uint8.
 
     The square is always centred on the brick. Parts of it that lie outside
@@ -216,24 +129,6 @@ def _to_grey(image) -> np.ndarray:
             rgb[..., 0] * 19595 + rgb[..., 1] * 38470 + rgb[..., 2] * 7471 + 0x8000
         ) >> 16
     return array.astype(np.int16)
-
-
-def _to_rgb(image) -> np.ndarray:
-    """PIL image or numpy array -> uint8 RGB array (H, W, 3)."""
-    if isinstance(image, Image.Image):
-        return np.asarray(image.convert("RGB"))
-
-    array = np.asarray(image)
-    if array.ndim == 2:
-        array = np.repeat(array[..., None], 3, axis=2)
-    return array[..., :3].astype(np.uint8)
-
-
-def _border_pixels(image: np.ndarray) -> np.ndarray:
-    """All pixels of the outermost row and column on every side."""
-    top, bottom = image[0], image[-1]
-    left, right = image[:, 0], image[:, -1]
-    return np.concatenate([top, bottom, left, right])
 
 
 def _odd_kernel(size_in_pixels: int) -> np.ndarray:

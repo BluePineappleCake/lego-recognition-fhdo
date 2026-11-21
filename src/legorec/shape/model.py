@@ -15,17 +15,15 @@ About 1.2 million parameters (ResNet-18 for comparison: about 11 million).
 The image alone does not show how big a brick is (every brick is resized to
 96 x 96). On a sheet photo its size in mm is known: the size prior
 (legorec.shape.size_prior) adds that to the scores.
+
+This file: the network and its checkpoint files. To use a trained model on
+new bricks: legorec.shape.classifier.
 """
 
 from pathlib import Path
 
-import numpy as np
 import torch
 from torch import nn
-
-from legorec.shape.augment import normalize
-from legorec.shape.preprocess import preprocess_crop, preprocess_images
-from legorec.types import BrickCrop
 
 # 2: grey + contrast stretch + YOLO masks, no size input. Checkpoints without
 # "format" are older, see check_supported.
@@ -146,99 +144,3 @@ def load_checkpoint(path, device: str = "cpu") -> dict:
     run anything on our machines, and save_checkpoint stores nothing else.
     """
     return torch.load(path, map_location=device, weights_only=True)
-
-
-class ShapeClassifier:
-    """A trained model plus everything needed to use it on new images.
-
-    Loads a checkpoint written by save_checkpoint and applies the same
-    preprocessing that was used in training.
-
-    size_prior: legorec.shape.size_prior.SizePrior. If given, predict() and
-        crop_scores() also weigh how well the measured size fits each part.
-        Only for crops from a sheet photo (known px per mm).
-    """
-
-    def __init__(
-        self,
-        checkpoint: str | Path,
-        device: str = "cpu",
-        size_prior=None,
-    ):
-        saved = load_checkpoint(checkpoint, device)
-        check_supported(saved)
-        config = saved["cfg"]
-
-        self.parts = list(saved["parts"])  # part numbers in the order of the outputs
-        self.names = saved.get("names", {})  # part number -> readable name
-        self.size = config["size"]
-
-        self.model = SmallCNN(len(self.parts), config["width"], config["dropout"])
-        self.model.load_state_dict(saved["model"])
-        self.model.to(device).eval()
-        self.device = device
-        self.size_prior = size_prior
-
-    @torch.no_grad()
-    def _scores(self, arrays, batch_size=256) -> torch.Tensor:
-        """Preprocessed arrays -> raw model scores (N x parts), on the CPU."""
-        if not arrays:
-            # e.g. the segmentation found no brick on a photo
-            return torch.empty(0, len(self.parts))
-        out = []
-        for start in range(0, len(arrays), batch_size):
-            batch = arrays[start : start + batch_size]
-            images = normalize(torch.from_numpy(np.stack(batch)).unsqueeze(1))
-            out.append(self.model(images.to(self.device)).cpu())
-        return torch.cat(out)
-
-    def _sheet_scores(self, crops) -> torch.Tensor:
-        """Scores of crops from a sheet photo: + the size prior, if there is one."""
-        scores = self._scores([preprocess_crop(c, self.size) for c in crops])
-        if self.size_prior is not None:
-            prior = self.size_prior.log_likelihood(crops, self.parts)
-            scores = scores + torch.from_numpy(prior)
-        return scores
-
-    def _top_k(self, scores: torch.Tensor, k):
-        """Scores -> for every image the k most likely parts."""
-        probabilities = scores.softmax(dim=1)
-        top_probs, top_indices = probabilities.topk(
-            min(k, probabilities.shape[1]), dim=1
-        )
-
-        results = []
-        for indices, probs in zip(top_indices.tolist(), top_probs.tolist()):
-            results.append([(self.parts[i], float(p)) for i, p in zip(indices, probs)])
-        return results
-
-    def predict(self, crops: list[BrickCrop]) -> list[tuple[str, float]]:
-        """Bricks cut out by the segmentation -> [(part number, probability)].
-
-        Example: [("3001", 0.93), ("3022", 0.71)]
-        """
-        top_1 = self._top_k(self._sheet_scores(crops), k=1)
-        return [best[0] for best in top_1]
-
-    def predict_images(self, images, k: int = 3):
-        """Photos with one brick each on a plain background.
-
-        Returns (top-k [(part number, probability)] per image,
-                 the preprocessed images the model saw).
-        """
-        arrays = self._from_images(images)
-        return self._top_k(self._scores(arrays), k), arrays
-
-    def scores(self, images) -> np.ndarray:
-        """Photos with one brick each -> raw scores (N images x parts), the same
-        preprocessing as in training. For evaluations that need every score."""
-        return self._scores(self._from_images(images)).numpy()
-
-    def crop_scores(self, crops: list[BrickCrop]) -> np.ndarray:
-        """Like scores(), for BrickCrops of the segmentation (as predict(),
-        with the size prior if there is one)."""
-        return self._sheet_scores(crops).numpy()
-
-    def _from_images(self, images):
-        """Photos -> preprocessed arrays, as in training (YOLO mask)."""
-        return preprocess_images(images, self.size)[0]

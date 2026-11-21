@@ -1,5 +1,5 @@
 # The team's model. Settings not listed here: TrainConfig in
-# src/legorec/shape/train.py.
+# src/legorec/shape/training.py.
 #
 # train_on: the internet photos and renders, our own renders
 #   (data/raw/own_renders; add parts with scripts/render_ldraw.py) and, for

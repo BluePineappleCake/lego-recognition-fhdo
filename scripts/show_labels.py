@@ -16,7 +16,7 @@ import cv2
 import numpy as np
 
 from legorec.paths import processed_dir
-from legorec.segment.yolo import read_label_file, select_photos
+from legorec.segment.labels import read_label_file, select_photos
 
 COLOUR = (0, 255, 255)  # BGR yellow
 TILE = (540, 620)

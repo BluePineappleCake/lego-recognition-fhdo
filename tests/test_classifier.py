@@ -3,7 +3,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from legorec.shape import predict as shape_predict
+from legorec.shape import classifier as shape_classifier
+from legorec.shape.classifier import ShapeClassifier, load_classifier
 from legorec.shape.model import SmallCNN, save_checkpoint
 from legorec.types import BrickCrop
 
@@ -30,43 +31,36 @@ def _crop_with_two_bricks():
     return BrickCrop(image=image, mask=mask, bbox=(500, 300, 160, 120))
 
 
-@pytest.fixture(autouse=True)
-def _no_loaded_model():
-    """Every test starts without a loaded model."""
-    shape_predict._classifier = None
-    yield
-    shape_predict._classifier = None
+def test_predict_returns_part_and_confidence(tmp_path):
+    classifier = load_classifier(_save_tiny_checkpoint(tmp_path / "shape.pt"))
 
-
-def test_predict_returns_part_and_confidence(tmp_path, monkeypatch):
-    checkpoint = _save_tiny_checkpoint(tmp_path / "shape.pt")
-    monkeypatch.setenv("LEGOREC_SHAPE_MODEL", str(checkpoint))
-
-    part, confidence = shape_predict.predict(_crop_with_two_bricks())
+    [(part, confidence)] = classifier.predict([_crop_with_two_bricks()])
 
     assert part in PARTS
     assert isinstance(confidence, float) and 0 < confidence <= 1
 
 
-def test_model_is_loaded_only_once(tmp_path, monkeypatch):
-    checkpoint = _save_tiny_checkpoint(tmp_path / "shape.pt")
-    monkeypatch.setenv("LEGOREC_SHAPE_MODEL", str(checkpoint))
+def test_top_k_and_scores_agree_with_predict(tmp_path):
+    classifier = load_classifier(_save_tiny_checkpoint(tmp_path / "shape.pt"))
+    crops = [_crop_with_two_bricks()] * 2
 
-    shape_predict.predict(_crop_with_two_bricks())
-    first = shape_predict._classifier
-    shape_predict.predict(_crop_with_two_bricks())
-    assert shape_predict._classifier is first
+    top = classifier.top_k(crops, k=3)
+    scores = classifier.scores(crops)
+
+    assert len(top) == 2 and len(top[0]) == 3
+    assert abs(sum(p for _, p in top[0]) - 1) < 1e-5
+    assert scores.shape == (2, len(PARTS))
+    assert top[0][0] == classifier.predict(crops)[0]
+    assert PARTS[int(scores[0].argmax())] == top[0][0][0]
 
 
 def test_missing_model_gives_a_helpful_error(tmp_path, monkeypatch):
     monkeypatch.setenv("LEGOREC_SHAPE_MODEL", str(tmp_path / "does_not_exist.pt"))
     with pytest.raises(FileNotFoundError, match="LEGOREC_SHAPE_MODEL"):
-        shape_predict.predict(_crop_with_two_bricks())
+        load_classifier()
 
 
 def test_photo_without_bricks_gives_an_empty_list(tmp_path):
-    from legorec.shape.model import ShapeClassifier
-
     classifier = ShapeClassifier(_save_tiny_checkpoint(tmp_path / "shape.pt"))
     assert classifier.predict([]) == []
     assert classifier.scores([]).shape == (0, len(PARTS))
@@ -78,7 +72,7 @@ def test_checkpoint_of_a_real_run_loads_without_pickled_code(tmp_path):
     from dataclasses import asdict
 
     from legorec.shape.model import load_checkpoint
-    from legorec.shape.train import TrainConfig
+    from legorec.shape.training import TrainConfig
 
     model = SmallCNN(len(PARTS), width=8)
     path = tmp_path / "run.pt"
@@ -93,10 +87,23 @@ def test_size_prior_is_on_by_default_and_can_be_switched_off(tmp_path, monkeypat
 
     table = tmp_path / "sizes.csv"
     size_prior.SizePrior.fit({"3001": [(36.0, 18.0)] * 5}).save(table)
-    monkeypatch.setattr(shape_predict, "TABLE", table)
+    monkeypatch.setattr(shape_classifier, "TABLE", table)
     checkpoint = _save_tiny_checkpoint(tmp_path / "shape.pt")
-    assert shape_predict.load_model(checkpoint, device="cpu").size_prior is not None
-    off = shape_predict.load_model(checkpoint, device="cpu", size_prior=None)
+    assert load_classifier(checkpoint, device="cpu").size_prior is not None
+    off = load_classifier(checkpoint, device="cpu", size_prior=None)
     assert off.size_prior is None
-    monkeypatch.setattr(shape_predict, "TABLE", tmp_path / "missing.csv")
-    assert shape_predict.load_model(checkpoint, device="cpu").size_prior is None
+    monkeypatch.setattr(shape_classifier, "TABLE", tmp_path / "missing.csv")
+    assert load_classifier(checkpoint, device="cpu").size_prior is None
+
+
+def test_pipeline_names_every_brick_it_finds(tmp_path, monkeypatch):
+    from legorec import pipeline
+
+    crops = [_crop_with_two_bricks()] * 3
+    monkeypatch.setattr(pipeline, "bricks_on_sheet", lambda photo, model=None: crops)
+    classifier = ShapeClassifier(_save_tiny_checkpoint(tmp_path / "shape.pt"))
+
+    found = pipeline.find_and_name(np.zeros((10, 10, 3), np.uint8), classifier)
+
+    assert len(found) == 3 and found[0].crop is crops[0]
+    assert (found[0].part, found[0].confidence) == classifier.predict(crops)[0]

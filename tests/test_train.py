@@ -4,9 +4,9 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from legorec.paths import REPO_ROOT
-from legorec.shape.loaders import Batches
+from legorec.shape.batches import Batches
 from legorec.shape.model import SmallCNN
-from legorec.shape.train import TrainConfig, evaluate, overfit_one_batch, train_epoch
+from legorec.shape.training import TrainConfig, evaluate, overfit_one_batch, train_epoch
 
 
 def test_config_file_overrides_defaults(tmp_path):
@@ -86,7 +86,7 @@ def test_model_can_memorise_one_batch():
 
 
 def test_photos_are_repeated_and_appended():
-    from legorec.shape.train import TrainData, combine_train
+    from legorec.shape.training_data import TrainData, combine_train
 
     renders = (np.zeros((5, 4, 4), np.uint8), [0] * 5)
     photos = (np.full((2, 4, 4), 7, np.uint8), [1, 2])
@@ -103,7 +103,7 @@ def test_photos_are_repeated_and_appended():
 
 
 def test_missing_internet_folder_is_skipped(tmp_path):
-    from legorec.shape.train import load_source
+    from legorec.shape.training_data import load_source
 
     assert load_source("internet_photos", TrainConfig(), tmp_path) is None
     assert load_source("internet_renders", TrainConfig(), tmp_path) is None
@@ -146,17 +146,17 @@ def _write_renders(root, files):
 def _no_yolo(monkeypatch):
     """Training images get their mask from YOLO; in tests nothing is found, so
     every image takes the brick_mask route (no model file needed)."""
-    from legorec.segment import bricks
+    from legorec.segment import bricks, single
 
     monkeypatch.setattr(bricks, "brick_model_id", lambda model=None: "test")
     monkeypatch.setattr(
-        bricks, "single_brick_masks", lambda images, *a, **k: [None] * len(images)
+        single, "single_brick_masks", lambda images, *a, **k: [None] * len(images)
     )
 
 
 def test_classes_come_from_the_training_sources(tmp_path, monkeypatch):
     from legorec.data import renders
-    from legorec.shape.train import load_training_data
+    from legorec.shape.training_data import load_training_data
 
     _no_yolo(monkeypatch)
     monkeypatch.setenv("LEGOREC_PROCESSED", str(tmp_path / "cache"))

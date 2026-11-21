@@ -25,7 +25,7 @@ import zipfile
 from pathlib import Path
 
 from legorec.paths import LABELS_DIR, processed_dir
-from legorec.segment.yolo import NAMES, select_photos
+from legorec.segment.labels import NAMES, select_photos
 
 FIXED_DIR = LABELS_DIR / "sheets"  # versioned in Git, see data/README.md
 
