@@ -1,7 +1,8 @@
 """Measure the size of every part on our sheet photos: the table of the size
 prior (legorec.shape.size_prior).
 
-    python scripts/size_check.py --table      # (--table is optional)
+    python scripts/size_check.py
+    python scripts/size_check.py --method threshold
 
 Every brick on the train sheet photos is found with the brick finder; its long
 and short side in mm (smallest rotated rectangle around the mask, 8 px/mm)
@@ -38,9 +39,6 @@ def train_sheet_crops(method: str) -> dict[str, list]:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--table", action="store_true", help="the only mode (kept for old commands)"
-    )
     parser.add_argument("--method", default="yolo", choices=["yolo", "threshold"])
     args = parser.parse_args()
 

@@ -301,8 +301,8 @@ python scripts/find_bricks.py photo.jpg --no-shape           # only find the bri
 - The part numbers come from `models/shape.pt` (or `--shape-model`), weighed
   by the measured size of every brick in mm (the **size prior**, table
   `data/reference/part_sizes.csv`). `--no-size-prior` switches it off. After
-  new sheet photos, rebuild the table with `python scripts/size_check.py
-  --table` and commit it.
+  new sheet photos, rebuild the table with `python scripts/size_check.py`
+  and commit it.
 
 To evaluate shape models on real photos:
 
@@ -405,7 +405,7 @@ Every file starts with a docstring that explains the idea behind it.
 | `eval_internet.py`, `eval_own.py` | shape models on the internet photos / on our sheet photos (whole pipeline) |
 | `export_yolo.py`, `cvat_labels.py`, `show_labels.py` | YOLO labels: export, correct by hand in CVAT, check by eye |
 | `render_ldraw.py` | our own renders from the LDraw library (Blender) |
-| `size_check.py` | `--table`: the size of every part in mm for the size prior |
+| `size_check.py` | the size of every part in mm: the table of the size prior |
 
 ## Working together
 
