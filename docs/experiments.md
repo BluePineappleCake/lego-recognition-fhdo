@@ -106,7 +106,9 @@ an entry.
 - [ ] YOLO vs `find_bricks` on photos with touching bricks and piles
       (2026-11-20).
 - [ ] Shadows: `brick_mask` counts the shadow as brick. Fix it, then check on
-      renders that nothing gets worse (`scripts/check_preprocess.py`).
+      renders that nothing gets worse (`scripts/check_preprocess.py`, removed
+      on 2026-11-21, in the Git history). Partly done: training images now
+      use YOLO masks (`mask: yolo`), `brick_mask` only as fallback.
 - [x] Size feature on real photos: calibrate `real_scale` (e.g. grey card +
       fixed camera). The size distribution will differ: renders show random
       3D poses, real bricks lie flat. → 1.28 for sheet crops (2026-11-21);

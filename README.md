@@ -18,7 +18,6 @@ explained in the [Glossary](#glossary).
 [Setup](#setup) ·
 [Get the data](#get-the-data) ·
 [Train the shape classifier](#train-the-shape-classifier) ·
-[Try a model on your own photos](#try-a-model-on-your-own-photos) ·
 [Find and name the bricks on a sheet photo](#find-and-name-the-bricks-on-a-sheet-photo) ·
 [Use the shape model in code](#use-the-shape-model-in-code) ·
 [Code tour](#code-tour) ·
@@ -129,7 +128,7 @@ install. The words in brackets are optional extras:
 | `dev` | pytest, ruff, pre-commit, nbstripout, scikit-learn | tests and code style (everyone) |
 | `train` | PyTorch, torchvision, W&B | training and using the model (already installed on Kaggle) |
 | `detect` | Ultralytics | finding the bricks with YOLO-seg (`--method yolo`, the default of `find_bricks.py`) |
-| `docs` | matplotlib, reportlab | the class overview figures and the PDF table |
+| `docs` | matplotlib | the notebooks in `notebooks/` |
 
 **4. Check that it works:**
 
@@ -160,17 +159,6 @@ shows the folder layout and how to download everything.
     same split.
   - The test split of our real photos is frozen: never train or tune anything
     on it.
-
-**Which bricks are in the renders?** `scripts/class_overview.py` draws all 50
-classes with example renders (PNG/PDF/CSV). `scripts/class_overview_pdf.py`
-makes a PDF table with notes on look-alikes. Both need the `docs` extra:
-
-```powershell
-pip install -e ".[docs]"
-python scripts/class_overview_pdf.py --data data/raw/renders/dataset --out docs/figures/classes_table.pdf
-```
-
-`docs/figures/` is generated and not committed.
 
 ## Train the shape classifier
 
@@ -294,26 +282,6 @@ os.environ["LEGOREC_PROCESSED"] = "/kaggle/working/processed"  # /kaggle/input i
 - For full training runs use *Save Version → Save & Run All*. Interactive
   sessions stop when you are idle.
 
-## Try a model on your own photos
-
-`scripts/predict_shape.py` runs a trained model on photos with **one brick per
-photo**: plain background, no strong shadow (a shadow counts as part of the
-brick).
-
-```powershell
-python scripts/predict_shape.py --checkpoint models/shape_<run id>.pt photo1.jpg photo2.jpg
-python scripts/predict_shape.py --checkpoint models/shape_<run id>.pt my_photos/
-```
-
-- The script writes `predictions.png`: the 96 × 96 crop the model actually saw,
-  next to its answer. Look at it first – a bad crop explains most bad
-  predictions.
-- If a folder has subfolders named after part numbers (`my_photos/3001/a.jpg`
-  …), they are used as labels and the script reports top-1, top-3 and
-  macro-F1 (the same metrics as for the renders).
-- Size-feature models also need `--real_scale`. The docstring at the top of the
-  script explains a rough calibration.
-
 ## Find and name the bricks on a sheet photo
 
 `scripts/find_bricks.py` runs the first steps of the pipeline on photos of the
@@ -434,13 +402,10 @@ Every file starts with a docstring that explains the idea behind it.
 |---|---|
 | `find_bricks.py` | sheet photo → bricks with outlines and part numbers |
 | `train_shape.py` | train the shape CNN |
-| `predict_shape.py` | shape model on photos with one brick each |
-| `eval_internet.py`, `eval_own.py` | shape models on the internet photos / our own crops |
+| `eval_internet.py`, `eval_own.py` | shape models on the internet photos / on our sheet photos (whole pipeline) |
 | `export_yolo.py`, `cvat_labels.py`, `show_labels.py` | YOLO labels: export, correct by hand in CVAT, check by eye |
-| `internet_split.py` | index the internet photos, create or check their split |
 | `render_ldraw.py` | our own renders from the LDraw library (Blender) |
-| `class_overview.py`, `class_overview_pdf.py` | overview figures of the 50 render classes |
-| `size_check.py`, `check_preprocess.py` | checks of the brick size and of the brick detection on renders |
+| `size_check.py` | `--table`: the size of every part in mm for the size prior |
 
 ## Working together
 

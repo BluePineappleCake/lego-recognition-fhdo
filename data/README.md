@@ -140,8 +140,8 @@ same as in `data/raw/own_photos/` (without `MIXED …` and 4073).
 - Tightly cropped: the brick size in pixels says nothing about the real
   size, so do not use `size_feature` with these photos.
 
-Code: `legorec.data.internet`. Overview and split check:
-`python scripts/internet_split.py --data <folder>`.
+Code: `legorec.data.internet`. The split file `data/splits/internet.csv` is
+in Git; a missing capture is an error, so copy the folders completely.
 
 ## 2d. Our renders (training data)
 

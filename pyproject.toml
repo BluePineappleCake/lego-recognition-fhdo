@@ -17,7 +17,7 @@ dependencies = [
 # torch: install the CUDA build from pytorch.org FIRST (PyPI gives CPU-only on Windows)
 train = ["torch>=2.4", "torchvision", "wandb"]
 detect = ["ultralytics>=8.3"]  # YOLO-seg: finds the bricks (AGPL-3.0)
-docs = ["matplotlib>=3.6", "reportlab"]  # scripts/class_overview*.py
+docs = ["matplotlib>=3.6"]  # notebooks
 dev = ["pytest", "ruff>=0.17,<0.18", "nbstripout", "pre-commit", "scikit-learn"]
 
 [tool.setuptools.packages.find]
