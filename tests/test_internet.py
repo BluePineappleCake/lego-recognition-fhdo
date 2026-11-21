@@ -5,9 +5,7 @@ from legorec.data.internet import (
     index_photos,
     load_or_create_photo_split,
     only_parts,
-    render_parts,
 )
-from legorec.data.renders import save_split
 
 
 def _photo(folder, file_name):
@@ -77,14 +75,7 @@ def test_unknown_file_name_is_an_error(tmp_path):
         index_photos(tmp_path)
 
 
-def test_only_parts_keeps_the_render_classes(tmp_path):
+def test_only_parts_keeps_the_given_parts(tmp_path):
     _dataset(tmp_path, captures=1)
-    render_split = tmp_path / "renders.csv"
-    save_split(
-        {"3001_000": "train", "3001_001": "test", "3002_000": "val"}, render_split
-    )
-
-    known = render_parts(render_split)
-    assert known == {"3001", "3002"}
-    kept = only_parts(index_photos(tmp_path), known)
+    kept = only_parts(index_photos(tmp_path), {"3001", "3002"})
     assert {p.part for p in kept} == {"3001"}

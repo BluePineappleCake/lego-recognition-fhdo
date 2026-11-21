@@ -29,8 +29,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from legorec.data.renders import SPLIT_FILE as RENDER_SPLIT_FILE
-from legorec.data.renders import canonical_part, load_or_create_split, load_split
+from legorec.data.renders import load_or_create_split
 from legorec.paths import SPLITS_DIR
 
 SPLIT_FILE = SPLITS_DIR / "internet.csv"
@@ -106,11 +105,6 @@ def load_or_create_photo_split(
     return load_or_create_split(photos, path, frac=SPLIT_FRACTIONS)
 
 
-def render_parts(path=RENDER_SPLIT_FILE) -> set[str]:
-    """The 50 part numbers the shape classifier knows, read from renders.csv."""
-    return {canonical_part(group.split("_")[0]) for group in load_split(path)}
-
-
 def only_parts(photos: list[InternetPhoto], parts: set[str]) -> list[InternetPhoto]:
-    """Keep the photos whose part is in `parts`, e.g. only_parts(x, render_parts())."""
+    """Keep the photos whose part is in `parts`, e.g. the parts every model knows."""
     return [photo for photo in photos if photo.part in parts]
