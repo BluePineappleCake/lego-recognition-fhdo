@@ -25,7 +25,9 @@ from legorec.types import BrickCrop
 # Change this whenever the images produced here change. It is part of the cache
 # file names, so a cache made with the old code is never reused by accident.
 # mask2: robust brick mask (#14). mask2-pad: square padded at the image edge.
-PREPROCESS_VERSION = "mask2-pad"
+# mask2-pad-grey: numpy images get exactly PIL's grey values (#36); since
+# mask: yolo the training images go that way too.
+PREPROCESS_VERSION = "mask2-pad-grey"
 
 DEFAULT_SIZE = 96  # side length of the classifier input in pixels
 DEFAULT_MARGIN = 0.08  # free space around the brick: 8 % of its size per side

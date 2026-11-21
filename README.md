@@ -34,8 +34,8 @@ Photo → Find bricks → Shape (CNN) + Colour → Inventory → "What can I bui
 | Step | What happens | Approach | Status |
 |---|---|---|---|
 | Capture | We photograph the bricks | Bricks on a printed capture sheet (template v2) with 4 ArUco markers, so every photo can be warped flat to the same scale (8 px/mm) | **in use**: 246 sheet photos of 19 parts |
-| Find bricks | Each brick is found and cut out | `find_bricks` (colour difference to the local background) or a YOLO-seg model with one class "brick", trained by us from scratch | **works on separated bricks**; touching bricks and piles still open |
-| Shape | Each cut-out gets a part number, e.g. 3001 = brick 2×4 | CNN on greyscale cut-outs, trained on renders and internet photos | **v0 trained**, see [Where we are](#where-we-are) |
+| Find bricks | Each brick is found and cut out | A YOLO-seg model with one class "brick", trained by us from scratch (the old colour threshold `find_bricks` is still there) | **in use** on separated bricks; touching bricks and piles still open |
+| Shape | Each cut-out gets a part number, e.g. 3001 = brick 2×4 | CNN on greyscale cut-outs, trained on internet photos and renders plus our own renders; the size of the brick in mm (known from the sheet) weighs the answer | **in use**: 84 % of the bricks on our test photos right, see [Where we are](#where-we-are) |
 | Colour | Each brick gets a LEGO colour | White balance with the grey card, then the nearest measured LEGO colour | planned |
 | Inventory | Everything is counted | Part, colour, count + confidence | planned |
 | Sets | We compare the inventory with official sets | Coverage and missing parts per set, using Rebrickable part lists | planned |
@@ -51,23 +51,24 @@ it back?
 
 ## Where we are
 
-From the [experiment log](docs/experiments.md) (last entry: 2026-11-20):
+From the [experiment log](docs/experiments.md) (last entry: 2026-11-21):
 
-- **Shape on renders:** about 94.5 % top-1, i.e. about 945 of 1,000 test
-  renders (images it has never seen) get the right part number. Two runs with
-  the same settings can differ by about 1 percentage point, so smaller
-  differences between two variants do not mean anything yet.
-- **Shape on real photos:** the render-to-real gap is huge. Trained on renders
-  only, the model gets 13 % of the bricks on our own photos right (contrast
-  stretch; the greyscale baseline 6 %). Adding the internet photos to training
-  lifts this to 49 %. The most frequent error is a brick vs a plate with the
-  same footprint: from above the height is hard to see.
-- **Finding bricks:** `find_bricks` and our YOLO-seg model both find every
-  separated brick on the test photos. Whether YOLO is better on touching
-  bricks is not measured yet.
-- **Default model:** the contrast-stretch model trained on renders only, for
-  now. The model with internet photos is better on real photos but not the
-  default yet.
+- **Whole pipeline on our own photos:** on sheet photos that no model has
+  seen (54 photos, 171 bricks of 19 parts), YOLO finds the bricks and the
+  shape model names 84 % of them correctly (92 % per photo; mean of 3
+  training runs of `shape_internet_own`, with the size prior). Default model:
+  `ok1tq8ks`, the best of the three on val.
+- **The sheet gives the size:** every brick is measured in mm (long and short
+  side). Weighing the CNN's answer with that size lifts our photos from about
+  56 % to 82–84 %, without any training.
+- **Training data:** internet photos and renders plus our own renders
+  (LDraw, `scripts/render_ldraw.py`); no Kaggle renders. The training images
+  are cut out by the same YOLO model as the sheet photos (`mask: yolo`), which
+  was better than the old mask in all 3 seeds.
+- **Main error left:** a brick vs a plate with the same footprint (3003 vs
+  3022, 3004 vs 3023). From above they look and measure almost the same.
+- **Careful:** test and training photos come from the same photo sessions. A
+  new session (other day, other light) as a frozen test is the next step.
 - **Not started:** colour, inventory, sets.
 
 Open questions and next steps are at the top of the

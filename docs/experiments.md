@@ -156,7 +156,8 @@ Code versions in the column *Code*:
 | repo before #13 | shape classifier v0 in the repo ([#11](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/11)) |
 | after #13 | training code simplified, mixed precision removed ([#13](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/13)) |
 | mask2 | robust brick mask, `PREPROCESS_VERSION = "mask2"` ([#14](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/14)) |
-| mask2-pad | current code: the crop square is padded at the image edge instead of shifted ([#18](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/18)). First runs: 2026-11-11. |
+| mask2-pad | the crop square is padded at the image edge instead of shifted ([#18](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/18)). First runs: 2026-11-11. All runs of 2026-11-21 use it. |
+| mask2-pad-grey | current code: numpy images (sheet crops, and with `mask: yolo` the training images) get exactly PIL's grey values instead of values up to 1 lower ([#36](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/36)). Caches are rebuilt; no run with it yet. |
 
 ## 2026-11-21: Whole pipeline on our test photos, internet + own model, size prior
 
