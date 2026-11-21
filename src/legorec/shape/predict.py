@@ -10,6 +10,12 @@ This is the interface the other steps use (issue #7):
 probability of the best part (0..1). It is not calibrated yet: on real photos
 the model can be wrong with 70-80 %.
 
+The size prior is on by default: the measured size of the brick in mm (long
+and short side, data/reference/part_sizes.csv) weighs the answer, as in
+scripts/find_bricks.py (docs/experiments.md, 2026-11-21: ~56 % -> ~84 % on
+our sheet photos). It assumes crops of a sheet photo (bricks_on_sheet, 8
+px/mm). For crops with another scale: load_model(size_prior=None).
+
 Which model is used?
     By default models/shape.pt. Copy the checkpoint the team agreed on there,
     or set the environment variable LEGOREC_SHAPE_MODEL to another file.
@@ -33,6 +39,7 @@ import torch
 
 from legorec.paths import shape_model_path
 from legorec.shape.model import ShapeClassifier
+from legorec.shape.size_prior import TABLE, SizePrior
 from legorec.types import BrickCrop
 
 # The loaded model. None until load_model() or the first predict() call.
@@ -43,7 +50,7 @@ def load_model(
     checkpoint: str | Path | None = None,
     real_scale: float | None = None,
     device: str | None = None,
-    size_prior=None,
+    size_prior="auto",
 ) -> ShapeClassifier:
     """Load a checkpoint and use it for all following predict() calls.
 
@@ -51,7 +58,9 @@ def load_model(
         default: models/shape.pt (or $LEGOREC_SHAPE_MODEL)
     real_scale: only for size-feature models, see ShapeClassifier
     device: "cuda" or "cpu", default: the GPU if there is one
-    size_prior: legorec.shape.size_prior.SizePrior, only for sheet crops
+    size_prior: legorec.shape.size_prior.SizePrior, only for crops of a sheet
+        photo. "auto" (default): the table in data/reference/ if it exists.
+        None: off.
     """
     global _classifier  # predict() uses the model loaded here
 
@@ -64,6 +73,8 @@ def load_model(
         )
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    if size_prior == "auto":
+        size_prior = SizePrior.load() if TABLE.exists() else None
 
     _classifier = ShapeClassifier(
         checkpoint, device=device, real_scale=real_scale, size_prior=size_prior

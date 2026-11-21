@@ -96,3 +96,17 @@ def test_checkpoint_of_a_real_run_loads_without_pickled_code(tmp_path):
     config = asdict(TrainConfig(width=8))
     save_checkpoint(path, model, PARTS, names, config, "test", SizeNorm(5.0, 0.3))
     assert load_checkpoint(path)["cfg"] == config
+
+
+def test_size_prior_is_on_by_default_and_can_be_switched_off(tmp_path, monkeypatch):
+    from legorec.shape import size_prior
+
+    table = tmp_path / "sizes.csv"
+    size_prior.SizePrior.fit({"3001": [(36.0, 18.0)] * 5}).save(table)
+    monkeypatch.setattr(shape_predict, "TABLE", table)
+    checkpoint = _save_tiny_checkpoint(tmp_path / "shape.pt")
+    assert shape_predict.load_model(checkpoint, device="cpu").size_prior is not None
+    off = shape_predict.load_model(checkpoint, device="cpu", size_prior=None)
+    assert off.size_prior is None
+    monkeypatch.setattr(shape_predict, "TABLE", tmp_path / "missing.csv")
+    assert shape_predict.load_model(checkpoint, device="cpu").size_prior is None
