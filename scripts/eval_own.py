@@ -35,7 +35,11 @@ two variants.
 
 Predictions: $LEGOREC_PROCESSED/eval_own_<model>.csv (eval_own_<source>_<model>.csv
 for yolo / threshold).
-Size-feature models are skipped: the crops have no common scale yet.
+Size-feature models need the brick size in render pixels. The sheet photos
+are warped to 8 px/mm, so for yolo / threshold one factor converts them:
+SHEET_REAL_SCALE (scripts/size_check.py --sheet). The crops in own_crops have
+no common scale (the .jpg are cut by hand): size models are skipped there,
+unless --real_scale is given.
 """
 
 import argparse
@@ -61,10 +65,15 @@ from legorec.eval.metrics import (
 from legorec.paths import MODELS_DIR, own_crops_dir, own_photos_dir, processed_dir
 from legorec.shape.model import ShapeClassifier
 
+# render px / sheet px for the same part, median over the 13 parts on the
+# train sheet photos (1.16 to 1.43 per part): scripts/size_check.py --sheet
+SHEET_REAL_SCALE = 1.28
+
 
 def variant_and_seed(checkpoint: Path) -> tuple[str, int]:
     cfg = torch.load(checkpoint, map_location="cpu", weights_only=False)["cfg"]
-    tags = "+".join(t for t in cfg.get("tags") or [] if t != "contrast")
+    tags = [t for t in cfg.get("tags") or [] if t != "contrast"]
+    tags = "+".join(tags + ["size"] * bool(cfg.get("size_feature")))
     return f"{tags or 'untagged'}/{cfg.get('contrast') or 'none'}", cfg.get("seed")
 
 
@@ -143,8 +152,9 @@ def sheet_crops(method, split, known):
     return crops, inputs, skipped
 
 
-def evaluate(checkpoint, crops, inputs, device):
-    classifier = ShapeClassifier(checkpoint, device=device)  # ValueError: size feature
+def evaluate(checkpoint, crops, inputs, device, real_scale=None):
+    # ValueError for a size-feature model without real_scale
+    classifier = ShapeClassifier(checkpoint, device=device, real_scale=real_scale)
     parts = classifier.parts
     y = np.array([parts.index(crop.part) for crop in crops])
     if isinstance(inputs[0], Image.Image):
@@ -180,8 +190,18 @@ def main():
         help="photos of this split of sheets.csv (default: all for crops, "
         "test for yolo / threshold; same split = same photos, comparable)",
     )
+    parser.add_argument(
+        "--real_scale",
+        type=float,
+        default=None,
+        help=f"for size-feature models (default: {SHEET_REAL_SCALE} for yolo / "
+        "threshold, none for crops)",
+    )
     parser.add_argument("--models", nargs="*", default=None)
     args = parser.parse_args()
+    real_scale = args.real_scale
+    if real_scale is None and args.source != "crops":
+        real_scale = SHEET_REAL_SCALE
 
     known = render_parts()
     if args.source == "crops":
@@ -211,7 +231,7 @@ def main():
         run = checkpoint.stem.removeprefix("shape_")
         try:
             classifier, m, pred, prob, y, photo_right = evaluate(
-                checkpoint, crops, inputs, device
+                checkpoint, crops, inputs, device, real_scale
             )
         except ValueError:
             print(f"[skip] {run}: size-feature model")
