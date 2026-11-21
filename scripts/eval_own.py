@@ -1,7 +1,24 @@
-"""Evaluate shape models on our own photos (single-brick crops).
+"""Evaluate shape models on our own photos.
 
     python scripts/eval_own.py                     # data/raw/own_crops, all models
     python scripts/eval_own.py --models models/shape_rydhagpu.pt
+    python scripts/eval_own.py --source yolo       # whole pipeline, test photos
+    python scripts/eval_own.py --source threshold  # same with find_bricks
+
+Two kinds of input (--source):
+
+    crops       data/raw/own_crops: cut with the first find_bricks, bad crops
+                removed by hand. The shape model alone, on clean crops; fixed,
+                so numbers stay comparable over time.
+    yolo /      the sheet photos (data/raw/own_photos) cut by bricks_on_sheet,
+    threshold   as in the real pipeline. Every brick on a photo of a part
+                folder is that part, so no labelling is needed (MIXED photos
+                are left out). Whatever the segmentation finds is counted,
+                also a half brick or a shadow: photo to part number, end to
+                end. Missed bricks do not show up here (see export_yolo.py).
+                Default --split test: YOLO was trained on train / val photos.
+
+To compare the two on the same photos: --source crops --split test.
 
 Only crops of the render classes are used (the model cannot answer the other
 parts). Crops of one photo are not independent (same part, same moment, same
@@ -16,12 +33,14 @@ shows mean and range over the seeds of a variant. Then per part and per
 session, and an exact McNemar test per photo between seed-matched models of
 two variants.
 
-Predictions: $LEGOREC_PROCESSED/eval_own_<model>.csv.
+Predictions: $LEGOREC_PROCESSED/eval_own_<model>.csv (eval_own_<source>_<model>.csv
+for yolo / threshold).
 Size-feature models are skipped: the crops have no common scale yet.
 """
 
 import argparse
 import csv
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -30,7 +49,8 @@ import torch
 from PIL import Image
 
 from legorec.data.internet import render_parts
-from legorec.data.own import index_own_crops
+from legorec.data.own import OwnCrop, index_own_crops, photo_sessions
+from legorec.data.sheets import index_sheet_photos, load_or_create_sheet_split
 from legorec.eval.metrics import (
     classification_metrics,
     group_top1,
@@ -38,7 +58,7 @@ from legorec.eval.metrics import (
     softmax,
     top1_among,
 )
-from legorec.paths import MODELS_DIR, own_crops_dir, processed_dir
+from legorec.paths import MODELS_DIR, own_crops_dir, own_photos_dir, processed_dir
 from legorec.shape.model import ShapeClassifier
 
 
@@ -48,11 +68,89 @@ def variant_and_seed(checkpoint: Path) -> tuple[str, int]:
     return f"{tags or 'untagged'}/{cfg.get('contrast') or 'none'}", cfg.get("seed")
 
 
-def evaluate(checkpoint, crops, images, device):
+def sheet_photos_per_split():
+    """{"train": [...], "val": [...], "test": [...]} of our sheet photos."""
+    photos = index_sheet_photos(own_photos_dir())
+    return load_or_create_sheet_split(photos)[0]
+
+
+def photos_of(photos_per_split, split):
+    """The photos of one split ("all": every photo)."""
+    return [
+        photo
+        for name, in_split in photos_per_split.items()
+        if split in ("all", name)
+        for photo in in_split
+    ]
+
+
+def own_crops(folder, split, known):
+    """The hand-checked crops -> (crops, their images, skipped folder names)."""
+    all_crops = index_own_crops(folder)
+    if split != "all":  # sheet photo groups look like "3001_IMG_3415"
+        groups = {photo.group for photo in photos_of(sheet_photos_per_split(), split)}
+        all_crops = [c for c in all_crops if f"{c.part}_{c.group}" in groups]
+    crops = [c for c in all_crops if c.part in known]
+    skipped = {c.name for c in all_crops} - {c.name for c in crops}
+    images = [Image.open(c.path).convert("RGB") for c in crops]
+    return crops, images, skipped
+
+
+def sheet_crops(method, split, known):
+    """Cut the sheet photos of `split` with bricks_on_sheet.
+
+    Returns (crops, their BrickCrops, skipped folder names).
+    """
+    import cv2
+
+    from legorec.segment import bricks_on_sheet
+
+    photos_per_split = sheet_photos_per_split()
+    every_photo = photos_of(photos_per_split, "all")
+    chosen = photos_of(photos_per_split, split)
+    skipped = {p.folder for p in chosen if p.part not in known}  # MIXED too
+    chosen = sorted((p for p in chosen if p.part in known), key=lambda p: p.group)
+
+    # sessions from all photos, so they are the same as for --source crops
+    number = {p.group: int(re.search(r"IMG_(\d+)", p.group)[1]) for p in every_photo}
+    session_of = photo_sessions(sorted(set(number.values())))
+    crops, inputs, no_markers, empty = [], [], [], []
+    for photo in chosen:
+        try:
+            found = bricks_on_sheet(cv2.imread(photo.path), method)
+        except ValueError:
+            no_markers.append(photo.group)
+            continue
+        if not found:
+            empty.append(photo.group)
+        for k, brick in enumerate(found, start=1):
+            session = session_of[number[photo.group]]
+            crops.append(
+                OwnCrop(
+                    f"{photo.path}#{k}", photo.part, photo.folder, photo.group, session
+                )
+            )
+            inputs.append(brick)
+    print(f"[data] {method} on {len(chosen)} {split} photos")
+    if no_markers:
+        print(f"[warn] markers not found, photo left out: {', '.join(no_markers)}")
+    if empty:
+        print(f"[warn] no brick found (counts as nothing): {', '.join(empty)}")
+    if split != "test" and method == "yolo":
+        print(
+            "[warn] YOLO was trained on train / val photos: finding is too easy there"
+        )
+    return crops, inputs, skipped
+
+
+def evaluate(checkpoint, crops, inputs, device):
     classifier = ShapeClassifier(checkpoint, device=device)  # ValueError: size feature
     parts = classifier.parts
     y = np.array([parts.index(crop.part) for crop in crops])
-    scores = classifier.scores(images)
+    if isinstance(inputs[0], Image.Image):
+        scores = classifier.scores(inputs)
+    else:
+        scores = classifier.crop_scores(inputs)
     m = classification_metrics(scores, y)
     m["top1_k"] = top1_among(scores, y, sorted(set(y)))
     photo_right = group_top1(scores, y, [crop.group for crop in crops])
@@ -65,24 +163,39 @@ def evaluate(checkpoint, crops, images, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--source",
+        choices=["crops", "yolo", "threshold"],
+        default="crops",
+        help="hand-checked crops, or the sheet photos cut by bricks_on_sheet",
+    )
+    parser.add_argument(
         "--data",
         default=str(own_crops_dir()),
-        help="folder with one subfolder per part (default: data/raw/own_crops)",
+        help="--source crops: one subfolder per part (default: data/raw/own_crops)",
+    )
+    parser.add_argument(
+        "--split",
+        choices=["test", "val", "train", "all"],
+        default=None,
+        help="photos of this split of sheets.csv (default: all for crops, "
+        "test for yolo / threshold; same split = same photos, comparable)",
     )
     parser.add_argument("--models", nargs="*", default=None)
     args = parser.parse_args()
 
-    all_crops = index_own_crops(args.data)
     known = render_parts()
-    crops = [c for c in all_crops if c.part in known]
-    skipped = sorted({c.name for c in all_crops} - {c.name for c in crops})
-    images = [Image.open(c.path).convert("RGB") for c in crops]
+    if args.source == "crops":
+        crops, inputs, skipped = own_crops(args.data, args.split or "all", known)
+    else:
+        crops, inputs, skipped = sheet_crops(args.source, args.split or "test", known)
+    if not crops:
+        raise SystemExit("no crops of a render class")
     print(
         f"[data] {len(crops)} crops from {len({c.group for c in crops})} photos, "
         f"{len({c.part for c in crops})} parts, sessions: "
         f"{', '.join(sorted({c.session for c in crops}))}"
     )
-    print(f"[data] not a render class, skipped: {', '.join(skipped) or '-'}\n")
+    print(f"[data] not a render class, skipped: {', '.join(sorted(skipped)) or '-'}\n")
 
     checkpoints = (
         [Path(p) for p in args.models]
@@ -98,7 +211,7 @@ def main():
         run = checkpoint.stem.removeprefix("shape_")
         try:
             classifier, m, pred, prob, y, photo_right = evaluate(
-                checkpoint, crops, images, device
+                checkpoint, crops, inputs, device
             )
         except ValueError:
             print(f"[skip] {run}: size-feature model")
@@ -114,7 +227,8 @@ def main():
             "names": classifier.names,
             "photo_right": photo_right,
         }
-        out = processed_dir() / f"eval_own_{run}.csv"
+        prefix = "eval_own" if args.source == "crops" else f"eval_own_{args.source}"
+        out = processed_dir() / f"{prefix}_{run}.csv"
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file, lineterminator="\n")

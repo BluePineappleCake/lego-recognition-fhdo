@@ -206,12 +206,7 @@ class ShapeClassifier:
 
         Example: [("3001", 0.93), ("3022", 0.71)]
         """
-        preprocessed = [
-            preprocess_crop(crop, self.size, contrast=self.contrast) for crop in crops
-        ]
-        arrays = [array for array, _ in preprocessed]
-        sizes = [size for _, size in preprocessed]
-        top_1 = self._top_k(arrays, sizes, k=1)
+        top_1 = self._top_k(*self._from_crops(crops), k=1)
         return [best[0] for best in top_1]
 
     def predict_images(self, images, k: int = 3):
@@ -221,21 +216,24 @@ class ShapeClassifier:
                  the preprocessed images the model saw,
                  the measured brick sizes in pixels).
         """
-        preprocessed = [
-            preprocess_image(image, self.size, contrast=self.contrast)
-            for image in images
-        ]
-        arrays = [array for array, _ in preprocessed]
-        sizes = [size for _, size in preprocessed]
+        arrays, sizes = self._from_images(images)
         return self._top_k(arrays, sizes, k), arrays, sizes
 
     def scores(self, images) -> np.ndarray:
         """Photos with one brick each -> raw scores (N images x parts), the same
         preprocessing as in training. For evaluations that need every score."""
-        preprocessed = [
-            preprocess_image(image, self.size, contrast=self.contrast)
-            for image in images
-        ]
-        arrays = [array for array, _ in preprocessed]
-        sizes = [size for _, size in preprocessed]
-        return self._scores(arrays, sizes).numpy()
+        return self._scores(*self._from_images(images)).numpy()
+
+    def crop_scores(self, crops: list[BrickCrop]) -> np.ndarray:
+        """Like scores(), for BrickCrops of the segmentation (as predict())."""
+        return self._scores(*self._from_crops(crops)).numpy()
+
+    def _from_images(self, images):
+        """Photos -> (preprocessed arrays, brick sizes in pixels)."""
+        done = [preprocess_image(i, self.size, contrast=self.contrast) for i in images]
+        return [array for array, _ in done], [size for _, size in done]
+
+    def _from_crops(self, crops):
+        """BrickCrops -> (preprocessed arrays, brick sizes in pixels)."""
+        done = [preprocess_crop(c, self.size, contrast=self.contrast) for c in crops]
+        return [array for array, _ in done], [size for _, size in done]

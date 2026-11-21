@@ -56,6 +56,24 @@ def test_shape_classifier_roundtrip(tmp_path):
     assert parts[int(scores.argmax())] == top[0][0][0]  # same model, same answer
 
 
+def test_crop_scores_match_predict():
+    from legorec.shape.model import ShapeClassifier
+    from legorec.types import BrickCrop
+
+    parts = ["3001", "3002", "3003"]
+    clf = ShapeClassifier.__new__(ShapeClassifier)  # no checkpoint needed
+    clf.parts, clf.size, clf.contrast, clf.device = parts, 96, "none", "cpu"
+    clf.real_scale, clf.size_norm = 1.0, SizeNorm(0.0, 1.0)
+    clf.model = SmallCNN(len(parts), width=8).eval()
+    image = np.full((120, 120, 3), 200, np.uint8)
+    mask = np.zeros((120, 120), bool)
+    image[30:90, 40:80], mask[30:90, 40:80] = 60, True
+    crop = BrickCrop(image, mask, (0, 0, 120, 120))
+    scores = clf.crop_scores([crop, crop])
+    assert scores.shape == (2, len(parts))
+    assert parts[int(scores[0].argmax())] == clf.predict([crop])[0][0]
+
+
 def test_batches_cover_every_sample_once():
     from legorec.shape.loaders import Batches
 

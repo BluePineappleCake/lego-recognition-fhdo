@@ -72,14 +72,14 @@ def index_own_crops(root: str | Path) -> list[OwnCrop]:
     if not found:
         raise FileNotFoundError(f"no images in {root}")
 
-    session_of = _sessions(sorted({number for *_, number in found}))
+    session_of = photo_sessions(sorted({number for *_, number in found}))
     return [
         OwnCrop(path, part, name, photo, session_of[number])
         for path, part, name, photo, number in found
     ]
 
 
-def _sessions(numbers: list[int]) -> dict[int, str]:
+def photo_sessions(numbers: list[int]) -> dict[int, str]:
     """Consecutive photo numbers -> session name "IMG_<first>-<last>"."""
     blocks = [[numbers[0]]]
     for number in numbers[1:]:
