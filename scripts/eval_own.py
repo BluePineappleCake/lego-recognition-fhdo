@@ -65,7 +65,7 @@ from legorec.eval.metrics import (
     top1_among,
 )
 from legorec.paths import MODELS_DIR, own_crops_dir, own_photos_dir, processed_dir
-from legorec.shape.model import ShapeClassifier, parts_known_by_all
+from legorec.shape.model import ShapeClassifier, load_checkpoint, parts_known_by_all
 from legorec.shape.size_prior import SizePrior
 
 # render px / sheet px for the same part, median over the 13 parts on the
@@ -74,7 +74,7 @@ SHEET_REAL_SCALE = 1.28
 
 
 def variant_and_seed(checkpoint: Path) -> tuple[str, int]:
-    cfg = torch.load(checkpoint, map_location="cpu", weights_only=False)["cfg"]
+    cfg = load_checkpoint(checkpoint)["cfg"]
     tags = [t for t in cfg.get("tags") or [] if t != "contrast"]
     tags = "+".join(tags + ["size"] * bool(cfg.get("size_feature")))
     return f"{tags or 'untagged'}/{cfg.get('contrast') or 'none'}", cfg.get("seed")

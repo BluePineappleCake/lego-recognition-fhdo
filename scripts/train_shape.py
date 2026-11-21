@@ -41,7 +41,7 @@ from legorec.eval.metrics import classification_metrics, error_breakdown
 from legorec.paths import MODELS_DIR
 from legorec.shape.augment import augment_batch, denormalize
 from legorec.shape.loaders import Batches
-from legorec.shape.model import SmallCNN, save_checkpoint
+from legorec.shape.model import SmallCNN, load_checkpoint, save_checkpoint
 from legorec.shape.preprocess import PREPROCESS_VERSION
 from legorec.shape.train import (
     PHOTO_SOURCES,
@@ -251,7 +251,7 @@ def main():
             )
 
     # 4. final test with the best checkpoint
-    model.load_state_dict(torch.load(checkpoint, map_location=device)["model"])
+    model.load_state_dict(load_checkpoint(checkpoint, device)["model"])
     test_metrics = {}
     for source in config.train_on:
         test = data.sources[source]["test"]
