@@ -59,13 +59,10 @@ def main():
     classifier = None
     if not args.no_shape:
         from legorec.shape.predict import load_model  # here: needs torch
-        from legorec.shape.size_prior import TABLE, SizePrior
 
-        prior = None
-        if not args.no_size_prior and TABLE.exists():
-            prior = SizePrior.load()
+        prior = None if args.no_size_prior else "auto"
         classifier = load_model(args.shape_model, size_prior=prior)
-        print(f"[shape] size prior: {'on' if prior else 'off'}")
+        print(f"[shape] size prior: {'on' if classifier.size_prior else 'off'}")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 

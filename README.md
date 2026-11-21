@@ -171,22 +171,37 @@ python scripts/class_overview_pdf.py --data data/raw/renders/dataset --out docs/
 ## Train the shape classifier
 
 The shape classifier is a small CNN. It looks at the grey 96 × 96 cut-out of
-one brick and answers with a part number. It is trained on the renders; with
-`real_train: internet` (e.g. `configs/shape_contrast_internet.yaml`) the train
-split of the internet photos is added.
+one brick and answers with a part number. Which images it learns from is set
+by `train_on` in the config; the classes are the parts that have training
+images:
+
+| Source (`train_on`) | Folder | Parts |
+|---|---|---|
+| `kaggle_renders` | `data/raw/renders/dataset/` | 50 |
+| `internet_photos` | `data/raw/internet/photos/` | 18 |
+| `internet_renders` | `data/raw/internet/renders/` | 17 |
+| `own_renders` | `data/raw/own_renders/` (`scripts/render_ldraw.py`) | 3 so far |
+| `own_photos` | bricks on our sheet photos, only the parts in `own_photo_parts` | e.g. 4073 |
+
+The team's model uses **`configs/shape_internet_own.yaml`**: internet photos
+and renders, our renders, and our photos of 4073 (19 parts, no Kaggle
+renders). Its training images are cut out by the YOLO brick finder
+(`mask: yolo`), the same way as the sheet photos later.
 
 **What one training run does** (`scripts/train_shape.py`):
 
-1. It reads the config and loads the preprocessed renders and, if they are in
-   `data/raw/internet/`, the internet photos. The very first run preprocesses
-   all 40,000 renders once (a few minutes) and caches them in
-   `data/processed/`.
+1. It reads the config and loads the images of every source in `train_on`,
+   plus the internet photos for evaluation. The first run preprocesses all
+   images once (a few minutes, with `mask: yolo` YOLO runs over each of them)
+   and caches them in `data/processed/`.
 2. It starts a run in W&B and logs a few training images, so you can see what
    the network sees.
-3. It trains for 30 epochs. After every epoch it checks the validation set and
-   keeps the checkpoint with the best validation macro-F1.
-4. It tests this best checkpoint once on the render test set and on the
-   internet photos (val split).
+3. It trains for 30 epochs. After every epoch it checks the val split of
+   every source and keeps the checkpoint with the best macro-F1 on the val
+   split of `select_on` (the internet photos for `shape_internet_own`).
+4. It tests this best checkpoint once on the test splits of the render
+   sources and on the internet photos (val split). The test splits of the
+   photos are left for `scripts/eval_own.py` and `scripts/eval_internet.py`.
 
 Result: the checkpoint `models/shape_<run id>.pt` on your disk, the same file as
 W&B artifact `shape-cnn`, and all curves and numbers in W&B.
@@ -210,25 +225,28 @@ $env:WANDB_ENTITY="lego-fhdo"   # cmd: set WANDB_ENTITY=lego-fhdo   macOS/Linux:
 If that does not work, something is broken, and a long run would be wasted.
 
 ```powershell
-python scripts/train_shape.py --config configs/shape_baseline.yaml --sanity
+python scripts/train_shape.py --config configs/shape_internet_own.yaml --sanity
 # last line: "[sanity] loss on that batch after training 0.0... (should be ~0)"
 ```
 
 **Real runs:**
 
 ```powershell
-python scripts/train_shape.py --config configs/shape_baseline.yaml               # baseline
-python scripts/train_shape.py --config configs/shape_size_feature.yaml --seed 1  # + brick size, seed 1
-python scripts/train_shape.py --config configs/shape_contrast.yaml               # contrast stretch per crop
+python scripts/train_shape.py --config configs/shape_internet_own.yaml           # the team's model
+python scripts/train_shape.py --config configs/shape_internet_own.yaml --seed 1  # the same, seed 1
+python scripts/train_shape.py --config configs/shape_contrast.yaml               # Kaggle renders only
 ```
 
-One run takes about 4–5 minutes on an RTX 4080.
+One run of `shape_internet_own` takes about 9 minutes on an RTX 4080 (30
+epochs of ~60,000 images). New renders in `data/raw/own_renders/` or new
+sheet photos are added to their split files automatically; commit those files
+afterwards.
 
 | Option | Meaning |
 |---|---|
 | `--config` | YAML file in `configs/` (required) |
-| `--data` | folder that directly contains the 40,000 PNGs (default: `data/raw/renders/dataset/`) |
-| `--internet-data` | folder with `photos/` of the internet dataset (default: `data/raw/internet/`; skipped if missing) |
+| `--data` | folder that directly contains the 40,000 Kaggle PNGs (default: `data/raw/renders/dataset/`) |
+| `--internet-data` | folder with `photos/` and `renders/` of the internet dataset (default: `data/raw/internet/`) |
 | `--seed` | random seed, e.g. `--seed 1` (default: 0) |
 | `--epochs` | number of epochs, overrides the config |
 | `--sanity` | run only the sanity check |
@@ -308,11 +326,22 @@ python scripts/find_bricks.py photo.jpg --no-shape           # only find the bri
   `data/processed/find_bricks/`, and prints one line per brick.
 - `--method yolo` (the default) needs the `detect` extra and the YOLO model in
   `models/bricks_yolo.pt` (or the file in `LEGOREC_BRICK_MODEL`).
-- The part numbers come from `models/shape.pt` (or `--shape-model`).
+- The part numbers come from `models/shape.pt` (or `--shape-model`), weighed
+  by the measured size of every brick in mm (the **size prior**, table
+  `data/reference/part_sizes.csv`). `--no-size-prior` switches it off. After
+  new sheet photos, rebuild the table with `python scripts/size_check.py
+  --table` and commit it.
 
-To evaluate shape models on real photos: `scripts/eval_internet.py` (internet
-photos) and `scripts/eval_own.py` (crops of our own photos). Both explain at
-the top what they report.
+To evaluate shape models on real photos:
+
+```powershell
+python scripts/eval_own.py --source yolo --size-prior --models models/shape_ok1tq8ks.pt  # whole pipeline, our test photos
+python scripts/eval_internet.py                                                          # internet photos, val split
+```
+
+Both explain at the top what they report. `eval_own.py` uses the test split of
+our sheet photos by default; comparing several models is only fair on the
+parts that all of them know, and the script does exactly that.
 
 ## Use the shape model in code
 
@@ -328,6 +357,9 @@ part, confidence = predict(crop)  # e.g. ("3001", 0.93)
 - `confidence` is the model's probability for its answer (0 to 1). It is **not
   calibrated** yet: on real photos the model can be wrong with 70–80 %
   confidence.
+- The size prior is on, as in `find_bricks.py`: `crop` must come from a sheet
+  photo (8 px/mm). For crops with another scale use
+  `load_model(size_prior=None)`.
 - A photo without bricks: `ShapeClassifier.predict([])` returns `[]`.
 - The model is loaded from `models/shape.pt`, or from the file named in the
   environment variable `LEGOREC_SHAPE_MODEL`.
@@ -342,11 +374,11 @@ once and copy it to `models/shape.pt`:
 
 ```powershell
 python -c "import wandb; wandb.Api().artifact('lego-fhdo/lego-recognition/shape-cnn:default').download('models')"
-copy models\shape_56b289he.pt models\shape.pt   # macOS/Linux: cp models/shape_56b289he.pt models/shape.pt
+copy models\shape_ok1tq8ks.pt models\shape.pt   # macOS/Linux: cp models/shape_ok1tq8ks.pt models/shape.pt
 ```
 
-The downloaded file is called `shape_<run id>.pt`; `56b289he` is the run of the
-current default.
+The downloaded file is called `shape_<run id>.pt`; `ok1tq8ks` is the run of the
+current default (`shape_internet_own`, chosen on 2026-11-21).
 
 ## Code tour
 
@@ -382,10 +414,12 @@ Every file starts with a docstring that explains the idea behind it.
 | `src/legorec/data/renders.py` | finds the Kaggle renders, splits them by pose, caches the preprocessed images |
 | `src/legorec/data/internet.py` | the internet photos: index, split by capture |
 | `src/legorec/data/sheets.py`, `own.py` | our sheet photos and the hand-checked crops of them |
+| `src/legorec/data/cut_renders.py` | renders already cut to the brick (internet renders, our LDraw renders), split by pose |
 | `src/legorec/shape/preprocess.py` | one brick image → 96 × 96 grey crop + measured size (the same code for renders and photos) |
 | `src/legorec/shape/augment.py` | random rotation, zoom, shift and lighting for every training batch |
 | `src/legorec/shape/model.py` | the CNN with the optional size input, checkpoints, `ShapeClassifier` for new images |
-| `src/legorec/shape/train.py` | `TrainConfig` (all settings), data loading, one training epoch, evaluation |
+| `src/legorec/shape/train.py` | `TrainConfig` (all settings), the training sources (`train_on`), one training epoch, evaluation |
+| `src/legorec/shape/size_prior.py` | the size prior: how well the measured size in mm fits each part |
 | `scripts/train_shape.py` | puts it together: data → W&B run → training → test |
 | `src/legorec/eval/metrics.py` | top-1, top-3, macro-F1, length errors, McNemar test |
 | `src/legorec/shape/predict.py` | `predict(crop)`, the interface for the other pipeline steps |
