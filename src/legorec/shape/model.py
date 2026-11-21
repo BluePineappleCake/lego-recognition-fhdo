@@ -122,8 +122,7 @@ def parts_known_by_all(checkpoints) -> set[str]:
     """
     known = None
     for path in checkpoints:
-        saved = torch.load(path, map_location="cpu", weights_only=False)
-        parts = {canonical_part(part) for part in saved["parts"]}
+        parts = {canonical_part(part) for part in load_checkpoint(path)["parts"]}
         known = parts if known is None else known & parts
     return known or set()
 
