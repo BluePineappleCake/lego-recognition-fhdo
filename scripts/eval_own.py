@@ -20,8 +20,11 @@ Two kinds of input (--source):
 
 To compare the two on the same photos: --source crops --split test.
 
-Only crops of the render classes are used (the model cannot answer the other
-parts). Crops of one photo are not independent (same part, same moment, same
+--size-prior (yolo / threshold): also weigh the measured size of every brick
+in mm (legorec.shape.size_prior). Run once with and once without it.
+
+Only crops of parts that every evaluated model knows are used (13 for the
+Kaggle models; pass --models to evaluate one model on all of its parts). Crops of one photo are not independent (same part, same moment, same
 light), so the honest numbers are per photo:
 
     top1 / top3 / mF1 / conf   per crop, 50-way, as for the renders
@@ -52,7 +55,6 @@ import numpy as np
 import torch
 from PIL import Image
 
-from legorec.data.internet import render_parts
 from legorec.data.own import OwnCrop, index_own_crops, photo_sessions
 from legorec.data.sheets import index_sheet_photos, load_or_create_sheet_split
 from legorec.eval.metrics import (
@@ -63,7 +65,8 @@ from legorec.eval.metrics import (
     top1_among,
 )
 from legorec.paths import MODELS_DIR, own_crops_dir, own_photos_dir, processed_dir
-from legorec.shape.model import ShapeClassifier
+from legorec.shape.model import ShapeClassifier, parts_known_by_all
+from legorec.shape.size_prior import SizePrior
 
 # render px / sheet px for the same part, median over the 13 parts on the
 # train sheet photos (1.16 to 1.43 per part): scripts/size_check.py --sheet
@@ -152,9 +155,11 @@ def sheet_crops(method, split, known):
     return crops, inputs, skipped
 
 
-def evaluate(checkpoint, crops, inputs, device, real_scale=None):
+def evaluate(checkpoint, crops, inputs, device, real_scale=None, size_prior=None):
     # ValueError for a size-feature model without real_scale
-    classifier = ShapeClassifier(checkpoint, device=device, real_scale=real_scale)
+    classifier = ShapeClassifier(
+        checkpoint, device=device, real_scale=real_scale, size_prior=size_prior
+    )
     parts = classifier.parts
     y = np.array([parts.index(crop.part) for crop in crops])
     if isinstance(inputs[0], Image.Image):
@@ -197,25 +202,20 @@ def main():
         help=f"for size-feature models (default: {SHEET_REAL_SCALE} for yolo / "
         "threshold, none for crops)",
     )
+    parser.add_argument(
+        "--size-prior",
+        action="store_true",
+        help="yolo / threshold: also weigh the measured size in mm "
+        "(data/reference/part_sizes.csv, from the train photos)",
+    )
     parser.add_argument("--models", nargs="*", default=None)
     args = parser.parse_args()
+    if args.size_prior and args.source == "crops":
+        parser.error("--size-prior needs a sheet source (yolo / threshold)")
+    size_prior = SizePrior.load() if args.size_prior else None
     real_scale = args.real_scale
     if real_scale is None and args.source != "crops":
         real_scale = SHEET_REAL_SCALE
-
-    known = render_parts()
-    if args.source == "crops":
-        crops, inputs, skipped = own_crops(args.data, args.split or "all", known)
-    else:
-        crops, inputs, skipped = sheet_crops(args.source, args.split or "test", known)
-    if not crops:
-        raise SystemExit("no crops of a render class")
-    print(
-        f"[data] {len(crops)} crops from {len({c.group for c in crops})} photos, "
-        f"{len({c.part for c in crops})} parts, sessions: "
-        f"{', '.join(sorted({c.session for c in crops}))}"
-    )
-    print(f"[data] not a render class, skipped: {', '.join(sorted(skipped)) or '-'}\n")
 
     checkpoints = (
         [Path(p) for p in args.models]
@@ -224,6 +224,21 @@ def main():
             MODELS_DIR.glob("shape_*.pt")  # shape.pt is a copy of one of them
         )
     )
+    known = parts_known_by_all(checkpoints)
+    if args.source == "crops":
+        crops, inputs, skipped = own_crops(args.data, args.split or "all", known)
+    else:
+        crops, inputs, skipped = sheet_crops(args.source, args.split or "test", known)
+    if not crops:
+        raise SystemExit("no crops of a part that every model knows")
+    print(
+        f"[data] {len(crops)} crops from {len({c.group for c in crops})} photos, "
+        f"{len({c.part for c in crops})} parts, sessions: "
+        f"{', '.join(sorted({c.session for c in crops}))}"
+    )
+    print(
+        f"[data] not known by every model, skipped: {', '.join(sorted(skipped)) or '-'}\n"
+    )
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     results = {}  # run -> dict
@@ -231,7 +246,7 @@ def main():
         run = checkpoint.stem.removeprefix("shape_")
         try:
             classifier, m, pred, prob, y, photo_right = evaluate(
-                checkpoint, crops, inputs, device, real_scale
+                checkpoint, crops, inputs, device, real_scale, size_prior
             )
         except ValueError:
             print(f"[skip] {run}: size-feature model")
@@ -248,6 +263,7 @@ def main():
             "photo_right": photo_right,
         }
         prefix = "eval_own" if args.source == "crops" else f"eval_own_{args.source}"
+        prefix += "_size" if size_prior else ""
         out = processed_dir() / f"{prefix}_{run}.csv"
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w", newline="", encoding="utf-8") as file:

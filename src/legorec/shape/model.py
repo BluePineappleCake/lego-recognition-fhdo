@@ -113,6 +113,21 @@ class SizeNorm:
         return ((log_sizes - self.mu) / self.sd).astype(np.float32)
 
 
+def parts_known_by_all(checkpoints) -> set[str]:
+    """Part numbers that every one of these checkpoints can answer.
+
+    Models trained on other data know other parts (50 Kaggle classes, 19 of
+    the internet + own model). Comparing them is only fair on the parts they
+    all know.
+    """
+    known = None
+    for path in checkpoints:
+        saved = torch.load(path, map_location="cpu", weights_only=False)
+        parts = {canonical_part(part) for part in saved["parts"]}
+        known = parts if known is None else known & parts
+    return known or set()
+
+
 def save_checkpoint(path, model, parts, names, config, split_hash, size_norm) -> None:
     """Save a trained model with everything ShapeClassifier needs to use it.
 
@@ -142,6 +157,9 @@ class ShapeClassifier:
         real_scale = (render pixels per mm) / (photo pixels per mm).
     Only needed for models trained with size_feature. Rough calibration: see
     scripts/predict_shape.py.
+    size_prior: legorec.shape.size_prior.SizePrior. If given, predict() and
+        crop_scores() also weigh how well the measured size fits each part.
+        Only for crops from a sheet photo (known px per mm).
     """
 
     def __init__(
@@ -149,6 +167,7 @@ class ShapeClassifier:
         checkpoint: str | Path,
         device: str = "cpu",
         real_scale: float | None = None,
+        size_prior=None,
     ):
         saved = torch.load(checkpoint, map_location=device, weights_only=False)
         config = saved["cfg"]
@@ -174,6 +193,7 @@ class ShapeClassifier:
                 "this model uses the brick size: pass real_scale (see docstring)"
             )
         self.real_scale = real_scale or 1.0
+        self.size_prior = size_prior
 
     @torch.no_grad()
     def _scores(self, arrays, sizes_px, batch_size=256) -> torch.Tensor:
@@ -189,9 +209,17 @@ class ShapeClassifier:
             out.append(self.model(images.to(self.device), z.to(self.device)).cpu())
         return torch.cat(out)
 
-    def _top_k(self, arrays, sizes_px, k):
-        """Preprocessed arrays + sizes -> for every image the k most likely parts."""
-        probabilities = self._scores(arrays, sizes_px).softmax(dim=1)
+    def _sheet_scores(self, crops) -> torch.Tensor:
+        """Scores of crops from a sheet photo: + the size prior, if there is one."""
+        scores = self._scores(*self._from_crops(crops))
+        if self.size_prior is not None:
+            prior = self.size_prior.log_likelihood(crops, self.parts)
+            scores = scores + torch.from_numpy(prior)
+        return scores
+
+    def _top_k(self, scores: torch.Tensor, k):
+        """Scores -> for every image the k most likely parts."""
+        probabilities = scores.softmax(dim=1)
         top_probs, top_indices = probabilities.topk(
             min(k, probabilities.shape[1]), dim=1
         )
@@ -206,7 +234,7 @@ class ShapeClassifier:
 
         Example: [("3001", 0.93), ("3022", 0.71)]
         """
-        top_1 = self._top_k(*self._from_crops(crops), k=1)
+        top_1 = self._top_k(self._sheet_scores(crops), k=1)
         return [best[0] for best in top_1]
 
     def predict_images(self, images, k: int = 3):
@@ -217,7 +245,7 @@ class ShapeClassifier:
                  the measured brick sizes in pixels).
         """
         arrays, sizes = self._from_images(images)
-        return self._top_k(arrays, sizes, k), arrays, sizes
+        return self._top_k(self._scores(arrays, sizes), k), arrays, sizes
 
     def scores(self, images) -> np.ndarray:
         """Photos with one brick each -> raw scores (N images x parts), the same
@@ -225,8 +253,9 @@ class ShapeClassifier:
         return self._scores(*self._from_images(images)).numpy()
 
     def crop_scores(self, crops: list[BrickCrop]) -> np.ndarray:
-        """Like scores(), for BrickCrops of the segmentation (as predict())."""
-        return self._scores(*self._from_crops(crops)).numpy()
+        """Like scores(), for BrickCrops of the segmentation (as predict(),
+        with the size prior if there is one)."""
+        return self._sheet_scores(crops).numpy()
 
     def _from_images(self, images):
         """Photos -> (preprocessed arrays, brick sizes in pixels)."""

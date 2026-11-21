@@ -4,13 +4,19 @@ scripts/train_shape.py puts them together and adds the W&B logging. They live
 here, without W&B, so they can be tested and reused later (e.g. for
 fine-tuning on our own photos).
 
-Real photos (legorec.data.internet) are used in two ways:
-    - always, if the folder exists: internet/val is evaluated after every
-      epoch, so every run reports how well it transfers to real photos
-    - with real_train: internet, the internet/train photos are also added to
-      the training set (each one real_repeat times per epoch)
+Training images come from the sources in config.train_on (see SOURCES):
+Kaggle renders, internet photos and renders, our renders and, for parts
+without internet data, our sheet photos. The classes are the parts that have
+training images. Every source keeps its own split file, so a test image of
+one source never gets into training.
+
+The internet photos are always loaded, if the folder exists: their val split
+is evaluated after every epoch, so every run reports how well it transfers to
+real photos (also when they are not in train_on).
 """
 
+import hashlib
+import json
 import random
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -20,12 +26,30 @@ import torch
 import torch.nn.functional as F
 import yaml
 
-from legorec.data.internet import index_photos, load_or_create_photo_split, only_parts
+from legorec.data.cut_renders import index_cut_renders, load_or_create_cut_render_split
+from legorec.data.internet import index_photos, load_or_create_photo_split
 from legorec.data.renders import build_cache, index_renders, load_or_create_split
-from legorec.paths import internet_dir, processed_dir, renders_dir
+from legorec.paths import (
+    internet_dir,
+    own_photos_dir,
+    own_renders_dir,
+    processed_dir,
+    renders_dir,
+)
 from legorec.shape.augment import augment_batch
 from legorec.shape.model import SizeNorm
-from legorec.shape.preprocess import PREPROCESS_VERSION
+from legorec.shape.preprocess import PREPROCESS_VERSION, preprocess_crop
+
+# where training images can come from (config: train_on)
+SOURCES = (
+    "kaggle_renders",  # data/raw/renders/dataset, 50 parts
+    "internet_photos",  # data/raw/internet/photos
+    "internet_renders",  # data/raw/internet/renders
+    "own_renders",  # data/raw/own_renders (scripts/render_ldraw.py)
+    "own_photos",  # bricks on our sheet photos, only config.own_photo_parts
+)
+# real photos: few, so every one is used real_repeat times per epoch
+PHOTO_SOURCES = {"internet_photos", "own_photos"}
 
 
 @dataclass
@@ -44,7 +68,15 @@ class TrainConfig:
     weight_decay: float = 5e-4
     label_smoothing: float = 0.1  # target ~0.9 instead of 1 for the right class
     hflip: bool = False  # mirror images; only if no part has a mirror twin
-    real_train: str = "none"  # "internet": also train on the internet/train photos
+    # sources of the training images, see SOURCES; the classes follow from them
+    train_on: list[str] = field(default_factory=lambda: ["kaggle_renders"])
+    own_photo_parts: list[str] = field(default_factory=list)  # for own_photos
+    # sources whose parts are the classes (default: all of train_on); images
+    # of other parts are dropped, e.g. [kaggle_renders] keeps the 50 classes
+    classes_from: list[str] | None = None
+    select_on: str | None = (
+        None  # val set that picks the best epoch (first of train_on)
+    )
     real_repeat: int = 8  # how often every real photo is used per epoch
     seed: int = 0
     project: str = "lego-recognition"  # W&B project
@@ -64,19 +96,61 @@ class TrainConfig:
         unknown = set(values) - {f.name for f in fields(cls)}
         if unknown:
             raise ValueError(f"unknown settings in {path}: {sorted(unknown)}")
-        return cls(**values)
+        config = cls(**values)
+        config.check()
+        return config
+
+    def __post_init__(self):
+        # YAML reads 4073 as a number, part numbers are text
+        self.own_photo_parts = [str(part) for part in self.own_photo_parts]
+        if self.select_on is None:
+            self.select_on = self.train_on[0] if self.train_on else None
+
+    def check(self) -> None:
+        """Settings that cannot work together are an error before any data loads."""
+        unknown = set(self.train_on) - set(SOURCES)
+        if unknown or not self.train_on:
+            raise ValueError(f"train_on: {self.train_on}; sources are {SOURCES}")
+        if self.size_feature and self.train_on != ["kaggle_renders"]:
+            # all other sources are cropped tightly: their size means nothing
+            raise ValueError("size_feature only works with train_on: [kaggle_renders]")
+        if ("own_photos" in self.train_on) != bool(self.own_photo_parts):
+            raise ValueError("own_photos in train_on needs own_photo_parts, and back")
+        if not set(self.classes_from or self.train_on) <= set(self.train_on):
+            raise ValueError("classes_from must be a part of train_on")
+        if self.select_on not in [*self.train_on, "internet_photos"]:
+            raise ValueError(f"select_on {self.select_on} is not loaded")
 
 
 @dataclass
-class RenderData:
-    """The preprocessed renders, ready for training."""
+class SourceData:
+    """One data source, preprocessed, all of its parts."""
 
-    # "train" / "val" / "test" -> (images (N, size, size), size feature z (N,), labels)
-    splits: dict[str, tuple[np.ndarray, np.ndarray, list[int]]]
-    parts: list[str]  # label i means parts[i]
+    # "train" / "val" / "test" -> (images (N, size, size) uint8, sizes in px, parts)
+    splits: dict[str, tuple[np.ndarray, np.ndarray, list[str]]]
     names: dict[str, str]  # part number -> readable name, e.g. "3001 brick 2x4"
+    split_hash: str  # fingerprint of its split file
+
+
+@dataclass
+class TrainData:
+    """All sources, cut down to the classes of the model, ready for training."""
+
+    # source -> "train" / "val" / "test" -> (images, size feature z, labels)
+    sources: dict[str, dict[str, tuple[np.ndarray, np.ndarray, list[int]]]]
+    parts: list[str]  # label i means parts[i]
+    names: dict[str, str]
     size_norm: SizeNorm  # turns brick sizes in pixels into z
-    split_hash: str  # fingerprint of the split (see legorec.data.renders)
+    split_hashes: dict[str, str]  # source -> fingerprint of its split
+
+    @property
+    def split_hash(self) -> str:
+        """One fingerprint for the run: the Kaggle one if only Kaggle renders are
+        used (as before), otherwise one over all sources."""
+        if set(self.split_hashes) == {"kaggle_renders"}:
+            return self.split_hashes["kaggle_renders"]
+        text = json.dumps(self.split_hashes, sort_keys=True)
+        return hashlib.md5(text.encode()).hexdigest()[:8]
 
 
 def set_seed(seed: int) -> None:
@@ -86,94 +160,159 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
 
 
-def load_render_data(
-    config: TrainConfig, data_dir: str | Path | None = None
-) -> RenderData:
-    """Renders -> split by pose -> preprocessed arrays (cached on disk)."""
-    images = index_renders(data_dir or renders_dir())
-    parts = sorted({image.part for image in images})
-    label_of_part = {part: label for label, part in enumerate(parts)}
-    names = {image.part: image.name for image in images}
-    images_per_split, split_hash = load_or_create_split(images)
+def _preprocess_cached(items_per_split, prefix, split_hash, config) -> SourceData:
+    """Items with .path / .part / .name per split -> SourceData (cached on disk).
 
-    # Every setting that changes the preprocessed images must be part of the
-    # cache file name, otherwise an old cache would be reused without warning.
+    Every setting that changes the preprocessed images must be part of the
+    cache file name, otherwise an old cache would be reused without warning.
+    The cache holds all parts of the source; the model's classes are picked
+    later (load_training_data), so one cache serves every class list.
+    """
     cache_tag = f"{config.size}_{PREPROCESS_VERSION}_{config.contrast}_{split_hash}"
-
-    raw = {}
+    splits, names = {}, {}
     for split in ("train", "val", "test"):
-        cache_file = processed_dir() / f"renders_{split}_{cache_tag}.npz"
-        x, sizes_px = build_cache(
-            images_per_split[split], config.size, cache_file, config.contrast
+        items = items_per_split.get(split, [])
+        cache_file = processed_dir() / f"{prefix}_{split}_{cache_tag}.npz"
+        x, sizes_px = build_cache(items, config.size, cache_file, config.contrast)
+        splits[split] = (x, sizes_px, [item.part for item in items])
+        names |= {item.part: item.name for item in items}
+    return SourceData(splits, names, split_hash)
+
+
+def _own_photo_crops(config: "TrainConfig") -> SourceData:
+    """Bricks on our sheet photos of config.own_photo_parts, cut by YOLO.
+
+    The split of data/splits/sheets.csv is kept, so the test photos that
+    scripts/eval_own.py uses never get into training. Not cached: these are
+    a few photos, and the brick finder may change.
+    """
+    import cv2
+
+    from legorec.data.sheets import index_sheet_photos, load_or_create_sheet_split
+    from legorec.segment import bricks_on_sheet
+
+    photos = index_sheet_photos(own_photos_dir())
+    photos_per_split, split_hash = load_or_create_sheet_split(photos)
+    wanted = set(config.own_photo_parts)
+    splits, names = {}, {}
+    for split in ("train", "val", "test"):
+        arrays, sizes, parts = [], [], []
+        for photo in photos_per_split.get(split, []):
+            if photo.part not in wanted:
+                continue
+            names[photo.part] = photo.folder
+            for crop in bricks_on_sheet(cv2.imread(photo.path)):
+                array, size = preprocess_crop(
+                    crop, config.size, contrast=config.contrast
+                )
+                arrays.append(array)
+                sizes.append(size)
+                parts.append(photo.part)
+        x = (
+            np.stack(arrays)
+            if arrays
+            else np.zeros((0, config.size, config.size), np.uint8)
         )
-        labels = [label_of_part[image.part] for image in images_per_split[split]]
-        raw[split] = (x, sizes_px, labels)
-        print(f"[data] {split}: {len(labels)} images")
-
-    # Standardise the size with the training set only: val or test statistics
-    # would leak information about them into the model.
-    size_norm = SizeNorm.fit(raw["train"][1])
-    splits = {
-        split: (x, size_norm(sizes_px), labels)
-        for split, (x, sizes_px, labels) in raw.items()
-    }
-    return RenderData(splits, parts, names, size_norm, split_hash)
+        splits[split] = (x, np.array(sizes, np.float32), parts)
+    missing = wanted - set(splits["train"][2])
+    if missing:
+        raise ValueError(f"own_photo_parts without train photos: {sorted(missing)}")
+    return SourceData(splits, names, split_hash)
 
 
-@dataclass
-class RealData:
-    """Internet photos of the parts the model knows, preprocessed like the renders."""
+def load_source(source: str, config: "TrainConfig", root=None) -> SourceData | None:
+    """Load one source (see SOURCES). None if its folder does not exist.
 
-    # "train" / "val" / "test" -> (images, z, labels), same layout as RenderData
-    splits: dict[str, tuple[np.ndarray, np.ndarray, list[int]]]
-    split_hash: str  # fingerprint of data/splits/internet.csv
-
-
-def load_internet_data(
-    config: TrainConfig, parts: list[str], data_dir: str | Path | None = None
-) -> RealData | None:
-    """Internet photos -> split by capture -> preprocessed arrays (cached on disk).
-
-    Only photos of `parts` are kept, labelled with the same class index as the
-    renders. Returns None if the folder does not exist (e.g. on Kaggle without
-    the dataset), so training on renders still works without it.
-
-    The size feature z is always 0 ("average size"): the photos are tightly
-    cropped, so the measured size in pixels says nothing about the real size.
+    root: folder of the source instead of the default from legorec.paths
+    (kaggle_renders: the folder with the PNGs; internet_*: data/raw/internet).
     """
-    root = Path(data_dir or internet_dir())
-    if not (root / "photos").is_dir():
-        print(f"[data] no internet photos in {root}, skipping them")
-        return None
+    if source == "kaggle_renders":
+        images = index_renders(root or renders_dir())
+        per_split, split_hash = load_or_create_split(images)
+        return _preprocess_cached(per_split, "renders", split_hash, config)
+    if source == "internet_photos":
+        root = Path(root or internet_dir())
+        if not (root / "photos").is_dir():
+            return None
+        per_split, split_hash = load_or_create_photo_split(index_photos(root))
+        return _preprocess_cached(per_split, source, split_hash, config)
+    if source in ("internet_renders", "own_renders"):
+        if root is None:
+            root = internet_dir() if source == "internet_renders" else own_renders_dir()
+        folder = Path(root) / "renders" if source == "internet_renders" else Path(root)
+        if not folder.is_dir() or not any(d.is_dir() for d in folder.iterdir()):
+            return None
+        renders = index_cut_renders(folder, strict=source == "own_renders")
+        per_split, split_hash = load_or_create_cut_render_split(renders, source)
+        return _preprocess_cached(per_split, source, split_hash, config)
+    if source == "own_photos":
+        return _own_photo_crops(config)
+    raise ValueError(f"unknown source {source!r}, known: {SOURCES}")
 
+
+def load_training_data(config: "TrainConfig", roots: dict | None = None) -> TrainData:
+    """Load config.train_on (+ the internet photos for evaluation, if there).
+
+    The classes are every part with training images in one of the
+    config.classes_from sources (default: train_on). Images of other parts
+    are dropped, e.g. internet photos of a part the model does not know.
+    """
+    roots = roots or {}
+    loaded = {}
+    for source in dict.fromkeys([*config.train_on, "internet_photos"]):
+        data = load_source(source, config, roots.get(source))
+        if data is None and source in config.train_on:
+            raise FileNotFoundError(f"train_on has {source}, but its folder is missing")
+        if data is None:
+            print(f"[data] no {source}, skipping it")
+            continue
+        loaded[source] = data
+
+    class_sources = config.classes_from or config.train_on
+    parts = sorted({p for s in class_sources for p in loaded[s].splits["train"][2]})
     label_of_part = {part: label for label, part in enumerate(parts)}
-    photos_per_split, split_hash = load_or_create_photo_split(index_photos(root))
-    cache_tag = f"{config.size}_{PREPROCESS_VERSION}_{config.contrast}_{split_hash}"
+    names = {}
+    for source in reversed(list(loaded)):  # the first source wins
+        names |= loaded[source].names
 
-    splits = {}
-    for split in ("train", "val", "test"):
-        photos = only_parts(photos_per_split[split], set(parts))
-        cache_file = processed_dir() / f"internet_{split}_{cache_tag}.npz"
-        x, _ = build_cache(photos, config.size, cache_file, config.contrast)
-        z = np.zeros(len(photos), dtype=np.float32)
-        splits[split] = (x, z, [label_of_part[photo.part] for photo in photos])
-        print(f"[data] internet {split}: {len(photos)} photos")
-    return RealData(splits, split_hash)
+    # Only the Kaggle renders show bricks at one camera distance; everything
+    # else is cropped tightly, so its size in pixels says nothing (z = 0).
+    if "kaggle_renders" in loaded:
+        size_norm = SizeNorm.fit(loaded["kaggle_renders"].splits["train"][1])
+    else:
+        size_norm = SizeNorm(0.0, 1.0)
+
+    sources = {}
+    for source, data in loaded.items():
+        sources[source] = {}
+        for split, (x, sizes_px, part_of) in data.splits.items():
+            keep = np.array([p in label_of_part for p in part_of], bool)
+            if source == "kaggle_renders" and len(x):
+                z = size_norm(sizes_px[keep])
+            else:
+                z = np.zeros(int(keep.sum()), np.float32)
+            labels = [label_of_part[p] for p, k in zip(part_of, keep) if k]
+            sources[source][split] = (x[keep] if len(x) else x, z, labels)
+            print(f"[data] {source} {split}: {len(labels)} images")
+    hashes = {source: data.split_hash for source, data in loaded.items()}
+    return TrainData(sources, parts, names, size_norm, hashes)
 
 
-def add_real_photos(render_train, real_train, repeat: int):
-    """Training arrays of the renders + every real photo `repeat` times.
+def combine_train(data: TrainData, train_on, repeat: int):
+    """Training arrays of all train_on sources; photos `repeat` times each.
 
-    Without repeating, ~1,900 photos next to 32,000 renders would hardly
-    matter. With repeat 8 they are about a third of every epoch. Repeated
-    copies are not identical for the network: every batch is augmented anew.
+    Without repeating, a few thousand photos next to tens of thousands of
+    renders would hardly matter. Repeated copies are not identical for the
+    network: every batch is augmented anew.
     """
-    x_r, z_r, y_r = render_train
-    x_p, z_p, y_p = real_train
-    x = np.concatenate([x_r] + [x_p] * repeat)
-    z = np.concatenate([z_r] + [z_p] * repeat)
-    y = list(y_r) + list(y_p) * repeat
-    return x, z.astype(np.float32), y
+    xs, zs, ys = [], [], []
+    for source in train_on:
+        x, z, y = data.sources[source]["train"]
+        times = repeat if source in PHOTO_SOURCES else 1
+        xs += [x] * times
+        zs += [z] * times
+        ys += list(y) * times
+    return np.concatenate(xs), np.concatenate(zs).astype(np.float32), ys
 
 
 def train_epoch(

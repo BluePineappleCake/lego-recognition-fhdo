@@ -1,0 +1,16 @@
+# No Kaggle renders: trained on the internet photos and renders, our own
+# renders (data/raw/own_renders; add parts with scripts/render_ldraw.py) and,
+# for parts without internet data, the bricks on our sheet photos (train split
+# of data/splits/sheets.csv; eval_own.py uses the test split).
+# The classes are all parts with training images. The best epoch is picked on
+# the internet photos (val), not on renders: that is what we want to be good at.
+size: 96
+width: 32
+size_feature: false
+contrast: stretch
+train_on: [internet_photos, internet_renders, own_renders, own_photos]
+own_photo_parts: ["4073"]
+select_on: internet_photos
+real_repeat: 8
+epochs: 30
+tags: [internet+own, contrast]

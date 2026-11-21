@@ -3,6 +3,7 @@ render pixels?
 
     python scripts/size_check.py [--data <folder with the render PNGs>]
     python scripts/size_check.py --sheet
+    python scripts/size_check.py --table
 
 Default: prints the median brick size (px) for parts that differ only in
 length. If the ratios match the real geometry, the render camera distance is
@@ -13,6 +14,10 @@ the sheet (bricks_on_sheet, 8 px/mm) and in the test renders, and their ratio.
 The median ratio is real_scale for size-feature models on sheet photos
 (SHEET_REAL_SCALE in scripts/eval_own.py). Train photos only, so the test
 photos stay unseen.
+
+--table: writes the long and short side of every part in mm, measured on
+the train sheet photos, to data/reference/part_sizes.csv (the size prior, see
+legorec.shape.size_prior). Run it again after new photos; then commit it.
 """
 
 import argparse
@@ -39,30 +44,62 @@ def render_sizes(images, parts) -> dict[str, list[float]]:
     return sizes_per_part
 
 
-def sheet_sizes(method: str) -> dict[str, list[float]]:
-    """Brick size in pixels of every brick on the train sheet photos, per part."""
+def train_sheet_crops(method: str) -> dict[str, list]:
+    """Every brick on the train sheet photos (BrickCrops), per part.
+    MIXED photos are left out: several parts, no label per brick."""
     import cv2
 
     from legorec.data.sheets import index_sheet_photos, load_or_create_sheet_split
     from legorec.paths import own_photos_dir
     from legorec.segment import bricks_on_sheet
-    from legorec.shape.preprocess import preprocess_crop
 
     photos = index_sheet_photos(own_photos_dir())
     train = load_or_create_sheet_split(photos)[0]["train"]
-    sizes_per_part = defaultdict(list)
+    crops_per_part = defaultdict(list)
     for photo in train:
-        for crop in bricks_on_sheet(cv2.imread(photo.path), method):
-            sizes_per_part[photo.part].append(preprocess_crop(crop)[1])
-    return sizes_per_part
+        if photo.part != "MIXED":
+            crops_per_part[photo.part] += bricks_on_sheet(
+                cv2.imread(photo.path), method
+            )
+    return crops_per_part
+
+
+def sheet_sizes(method: str) -> dict[str, list[float]]:
+    """Brick size in pixels (as preprocess measures it) per part, train photos."""
+    from legorec.shape.preprocess import preprocess_crop
+
+    return {
+        part: [preprocess_crop(crop)[1] for crop in crops]
+        for part, crops in train_sheet_crops(method).items()
+    }
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default=None)
     parser.add_argument("--sheet", action="store_true")
+    parser.add_argument("--table", action="store_true")
     parser.add_argument("--method", default="yolo", choices=["yolo", "threshold"])
     args = parser.parse_args()
+
+    if args.table:
+        from legorec.shape.size_prior import PX_PER_MM, TABLE, SizePrior, dimensions_px
+
+        mm = {
+            part: [np.array(dimensions_px(crop)) / PX_PER_MM for crop in crops]
+            for part, crops in train_sheet_crops(args.method).items()
+        }
+        prior = SizePrior.fit(mm)
+        prior.save()
+        print(f"{'part':8}{'n':>5}{'long':>8}{'short':>8}   sd long / short")
+        for part, (log_long, log_short, sd_long, sd_short, n) in prior.sizes.items():
+            print(
+                f"{part:8}{n:>5}{np.exp(log_long):>8.1f}{np.exp(log_short):>8.1f}"
+                f"   {sd_long:.3f} / {sd_short:.3f}"
+            )
+        print(f"[done] -> {TABLE}, commit it")
+        return
+
     images = index_renders(args.data or renders_dir())
 
     if not args.sheet:

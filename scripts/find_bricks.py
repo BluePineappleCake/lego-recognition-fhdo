@@ -12,7 +12,9 @@ For every photo writes to --out (default $LEGOREC_PROCESSED/find_bricks/):
 
 and prints one line per brick. Finding bricks: legorec.segment.bricks_on_sheet
 ("yolo" needs models/bricks_yolo.pt, see there). Parts: the shape model
-(default models/shape.pt); its confidences are not calibrated yet.
+(default models/shape.pt) plus the measured size in mm (size prior,
+data/reference/part_sizes.csv; --no-size-prior to switch it off). The
+confidences are not calibrated yet.
 """
 
 import argparse
@@ -50,14 +52,20 @@ def main():
     parser.add_argument("--brick-model", default=None, help="YOLO model (.pt)")
     parser.add_argument("--shape-model", default=None, help="shape CNN (.pt)")
     parser.add_argument("--no-shape", action="store_true")
+    parser.add_argument("--no-size-prior", action="store_true")
     parser.add_argument("--out", default=str(processed_dir() / "find_bricks"))
     args = parser.parse_args()
 
     classifier = None
     if not args.no_shape:
         from legorec.shape.predict import load_model  # here: needs torch
+        from legorec.shape.size_prior import TABLE, SizePrior
 
-        classifier = load_model(args.shape_model)
+        prior = None
+        if not args.no_size_prior and TABLE.exists():
+            prior = SizePrior.load()
+        classifier = load_model(args.shape_model, size_prior=prior)
+        print(f"[shape] size prior: {'on' if prior else 'off'}")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 

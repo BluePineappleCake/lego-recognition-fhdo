@@ -44,6 +44,11 @@ def internet_dir() -> Path:
     return data_dir() / "raw" / "internet"
 
 
+def own_renders_dir() -> Path:
+    """Our renders from LDraw (scripts/render_ldraw.py), one subfolder per part."""
+    return data_dir() / "raw" / "own_renders"
+
+
 def processed_dir() -> Path:
     return Path(os.environ.get("LEGOREC_PROCESSED", data_dir() / "processed"))
 

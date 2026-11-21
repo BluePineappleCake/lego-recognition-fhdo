@@ -80,12 +80,17 @@ def test_model_can_memorise_one_batch():
     assert loss < 0.1
 
 
-def test_real_photos_are_repeated_and_appended():
-    from legorec.shape.train import add_real_photos
+def test_photos_are_repeated_and_appended():
+    from legorec.shape.train import TrainData, combine_train
 
     renders = (np.zeros((5, 4, 4), np.uint8), np.ones(5, np.float32), [0] * 5)
     photos = (np.full((2, 4, 4), 7, np.uint8), np.zeros(2, np.float32), [1, 2])
-    x, z, y = add_real_photos(renders, photos, repeat=3)
+    sources = {
+        "internet_renders": {"train": renders},
+        "internet_photos": {"train": photos},
+    }
+    data = TrainData(sources, ["a", "b", "c"], {}, SizeNorm(0.0, 1.0), {})
+    x, z, y = combine_train(data, ["internet_renders", "internet_photos"], repeat=3)
 
     assert x.shape == (11, 4, 4) and z.shape == (11,) and len(y) == 11
     assert y == [0] * 5 + [1, 2] * 3
@@ -93,6 +98,78 @@ def test_real_photos_are_repeated_and_appended():
 
 
 def test_missing_internet_folder_is_skipped(tmp_path):
-    from legorec.shape.train import load_internet_data
+    from legorec.shape.train import load_source
 
-    assert load_internet_data(TrainConfig(), ["3001"], tmp_path) is None
+    assert load_source("internet_photos", TrainConfig(), tmp_path) is None
+    assert load_source("internet_renders", TrainConfig(), tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"train_on": ["kaggle"]},  # typo in a source
+        {"train_on": ["internet_renders"], "size_feature": True},
+        {"train_on": ["internet_renders", "own_photos"]},  # which parts?
+        {"train_on": ["internet_renders"], "own_photo_parts": ["4073"]},
+        {"train_on": ["internet_renders"], "classes_from": ["kaggle_renders"]},
+        {"train_on": ["internet_renders"], "select_on": "own_renders"},
+    ],
+)
+def test_settings_that_do_not_fit_together_are_an_error(settings):
+    with pytest.raises(ValueError):
+        TrainConfig(**settings).check()
+
+
+def test_part_numbers_from_yaml_are_text(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "train_on: [internet_renders, own_photos]\nown_photo_parts: [4073]\n",
+        encoding="utf-8",
+    )
+    assert TrainConfig.from_yaml(path).own_photo_parts == ["4073"]
+
+
+def _write_renders(root, files):
+    from PIL import Image
+
+    for name in files:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        image = np.full((40, 30), 220, np.uint8)
+        image[10:30, 8:22] = 60
+        Image.fromarray(image).save(path)
+
+
+def test_classes_come_from_the_training_sources(tmp_path, monkeypatch):
+    from legorec.data import cut_renders
+    from legorec.shape.train import load_training_data
+
+    monkeypatch.setenv("LEGOREC_PROCESSED", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        cut_renders,
+        "SPLIT_FILES",
+        {s: tmp_path / f"{s}.csv" for s in ("internet_renders", "own_renders")},
+    )
+    internet = tmp_path / "internet"
+    own = tmp_path / "own"
+    _write_renders(
+        internet / "renders",
+        [f"3001 brick 2x4/3001_Red_0_{i}.jpeg" for i in range(20)]
+        + [f"3005 brick 1x1/3005_Red_0_{i}.jpeg" for i in range(20)],
+    )
+    _write_renders(
+        own, [f"4073 round plate 1x1/4073_Red_0_{i}.jpeg" for i in range(20)]
+    )
+    config = TrainConfig(train_on=["internet_renders", "own_renders"])
+    roots = {
+        "internet_renders": internet,
+        "internet_photos": internet,
+        "own_renders": own,
+    }
+    data = load_training_data(config, roots)
+
+    assert data.parts == ["3001", "3005", "4073"]
+    assert set(data.sources) == {"internet_renders", "own_renders"}  # no photos/
+    n = sum(len(split[2]) for split in data.sources["own_renders"].values())
+    assert n == 20 and set(data.sources["own_renders"]["train"][2]) == {2}
+    assert (tmp_path / "own_renders.csv").exists()

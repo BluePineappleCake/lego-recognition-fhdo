@@ -149,16 +149,35 @@ def split_hash(assign: dict[str, str]) -> str:
     return hashlib.md5(as_text.encode()).hexdigest()[:8]
 
 
+def split_by_hash(group: str, frac=(0.8, 0.1, 0.1)) -> str:
+    """ "train", "val" or "test" for one group, from a hash of its name.
+
+    For groups added to an existing split: the answer depends only on the
+    name, not on which other groups exist, so adding data never moves a group
+    that is already in the file.
+    """
+    position = int(hashlib.md5(group.encode()).hexdigest()[:8], 16) / 2**32
+    train_share, val_share, _ = frac
+    if position < train_share:
+        return "train"
+    return "val" if position < train_share + val_share else "test"
+
+
 def load_or_create_split(
-    items: list[RenderImage], path=SPLIT_FILE, frac=(0.8, 0.1, 0.1)
+    items: list[RenderImage], path=SPLIT_FILE, frac=(0.8, 0.1, 0.1), extend=False
 ) -> tuple[dict[str, list[RenderImage]], str]:
     """Load the split from the repo, or create it if it does not exist yet.
 
     The split file is in Git so the whole team uses the same split: results
     are only comparable on the same split.
 
-    `frac` is only used when the file is created. Works for any items with
-    .part and .group (also legorec.data.internet).
+    `frac` is only used when the file is created or extended. Works for any
+    items with .part and .group (also legorec.data.internet).
+
+    extend=False: a group missing in the file is an error (fixed datasets).
+    extend=True: missing groups are added (split_by_hash) and the file is
+    written again; groups already in the file keep their split. For data we
+    keep adding to (our renders, our photos).
 
     Returns ({"train": [...], "val": [...], "test": [...]}, fingerprint).
     """
@@ -173,7 +192,11 @@ def load_or_create_split(
 
     # every pose must be in the file, otherwise images would silently be lost
     unknown_groups = {image.group for image in items} - split_of_group.keys()
-    if unknown_groups:
+    if unknown_groups and extend:
+        split_of_group |= {g: split_by_hash(g, frac) for g in unknown_groups}
+        save_split(split_of_group, path)
+        print(f"[split] added {len(unknown_groups)} new groups to {path} -> commit it")
+    elif unknown_groups:
         raise ValueError(
             f"{len(unknown_groups)} groups are not in {path}, "
             f"e.g. {sorted(unknown_groups)[:3]}"

@@ -4,11 +4,13 @@
     python scripts/eval_internet.py --models models/shape_56b289he.pt models/shape_hki5v89j.pt
     python scripts/eval_internet.py --split test          # only for final numbers!
 
-Only the 13 parts that are also render classes are used. Reported per model:
+Only parts that every evaluated model knows are used (13 for the Kaggle
+models; pass --models to evaluate one model on all of its parts). Reported
+per model:
 
-    top1 / top3 / macro_f1 / conf   as for the renders (50-way: the model may
-                                    answer any of its 50 parts)
-    top1_13      best guess among the 13 parts that occur in these photos only
+    top1 / top3 / macro_f1 / conf   as for the renders (the model may answer
+                                    any of its parts, e.g. 50 for Kaggle)
+    top1_k       best guess among the k parts that occur in these photos only
                  (how much of the error is "answered a part that is not here")
     capture_top1 one answer per capture: mean probability over its cameras
     length / other errors           see legorec.eval.metrics
@@ -30,12 +32,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from legorec.data.internet import (
-    index_photos,
-    load_or_create_photo_split,
-    only_parts,
-    render_parts,
-)
+from legorec.data.internet import index_photos, load_or_create_photo_split, only_parts
 from legorec.eval.metrics import (
     classification_metrics,
     confused_pairs,
@@ -46,7 +43,7 @@ from legorec.eval.metrics import (
     top1_among,
 )
 from legorec.paths import MODELS_DIR, internet_dir, processed_dir
-from legorec.shape.model import ShapeClassifier
+from legorec.shape.model import ShapeClassifier, parts_known_by_all
 
 
 def main():
@@ -62,17 +59,17 @@ def main():
     photos_per_split, split_hash = load_or_create_photo_split(
         index_photos(args.data or internet_dir())
     )
-    photos = only_parts(photos_per_split[args.split], render_parts())
+    checkpoints = args.models or sorted(
+        p
+        for p in MODELS_DIR.glob("shape_*.pt")  # shape.pt is a copy of one of them
+    )
+    photos = only_parts(photos_per_split[args.split], parts_known_by_all(checkpoints))
     images = [Image.open(photo.path).convert("RGB") for photo in photos]
     groups = sorted({photo.group for photo in photos})
     print(
         f"[data] internet/{args.split} (split {split_hash}): {len(photos)} photos, "
-        f"{len(groups)} captures, {len({p.part for p in photos})} parts\n"
-    )
-
-    checkpoints = args.models or sorted(
-        p
-        for p in MODELS_DIR.glob("shape_*.pt")  # shape.pt is a copy of one of them
+        f"{len(groups)} captures, {len({p.part for p in photos})} parts "
+        f"(the ones every model knows)\n"
     )
 
     results = {}  # model -> per image right?, per capture right?
@@ -93,7 +90,7 @@ def main():
 
         # best guess among the parts that occur in these photos
         present = {parts.index(photo.part) for photo in photos}
-        metrics["top1_13"] = top1_among(scores, y, sorted(present))
+        metrics["top1_k"] = top1_among(scores, y, sorted(present))
 
         # one answer per capture: mean probability over its cameras
         capture_right = np.array(
@@ -125,7 +122,7 @@ def main():
         print()
 
     header = (
-        f"{'model':<10}{'contrast':<10}{'top1':>7}{'top3':>7}{'top1_13':>9}"
+        f"{'model':<10}{'contrast':<10}{'top1':>7}{'top3':>7}{'top1_k':>9}"
         f"{'capture':>9}{'mF1':>7}{'conf':>7}{'len err':>9}{'other':>7}"
     )
     print(header)
@@ -133,7 +130,7 @@ def main():
     for run, contrast, m in rows:
         print(
             f"{run:<10}{contrast:<10}{m['top1']:>7.1%}{m['top3']:>7.1%}"
-            f"{m['top1_13']:>9.1%}{m['capture_top1']:>9.1%}{m['macro_f1']:>7.3f}"
+            f"{m['top1_k']:>9.1%}{m['capture_top1']:>9.1%}{m['macro_f1']:>7.3f}"
             f"{m['conf']:>7.2f}{m['errors_length']:>9}{m['errors_other']:>7}"
         )
 

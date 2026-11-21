@@ -111,8 +111,11 @@ or pass the folder with `--data`.
 - `photos/<part folder>/`: 3,683 real photos of 18 parts, one brick per
   image, tightly cropped. 13 parts are among our 50 render classes; the other
   5 (2654, 3009, 3666, 3710, 6215) are not.
-- `renders/`: ~44,000 coloured renders of 17 of these parts (no 3062b).
-  Not used yet. Our own renders go to `own_renders/`, not here.
+- `renders/`: ~43,000 coloured renders of 17 of these parts (no 3062b),
+  tightly cropped (`configs/shape_internet_own.yaml`). Some folders also hold
+  mould variants under their own number (3065 and 93792 in `3004 brick 1x2`,
+  30071 in `3005 brick 1x1`, ...): they count as the folder's part. Our own
+  renders go to `own_renders/`, not here (code: `legorec.data.cut_renders`).
 - The label is the folder name. A file name like
   `c1_5_pcsp_original_3001_1609710513579.jpg` means camera 1 of capture
   `5_pcsp_original_3001_1609710513579`: all cameras of a capture show the
@@ -171,12 +174,21 @@ are only comparable on the same split.
 to `train`, `val` or `test` (70 / 15 / 15 %, stratified per part, all 18
 parts). All cameras of one capture share a split. Never regenerate it either.
 
+`data/splits/internet_renders.csv` and `data/splits/own_renders.csv` assign
+every render **pose** (part + id in the file name) to `train`, `val` or `test`
+(80 / 10 / 10 %). New renders in `own_renders/` are added to the file when
+training starts (by a hash of their name); renders already in it never move.
+Commit the file afterwards.
+
 `data/splits/sheets.csv` assigns every **sheet photo** to `train`, `val` or
 `test` (70 / 15 / 15 %, stratified per part folder). It is split by photo,
 not by session: most parts were photographed in only one session, and for
-finding bricks (one class) the part does not matter. Never regenerate it.
-**Do not use it for the shape classifier**: there a split by photo would
-let the model learn the session instead of the part (see below).
+finding bricks (one class) the part does not matter. New photos are added to
+it like new renders. Never regenerate it.
+**Careful with the shape classifier**: a split by photo lets the model learn
+the session (background, light) instead of the part. `own_photo_parts` in a
+training config does exactly that for parts without internet data (4073):
+on those parts, the numbers of `eval_own.py` are too optimistic.
 
 `data/splits/finetune.csv` and `data/splits/test.csv` list photo paths.
 

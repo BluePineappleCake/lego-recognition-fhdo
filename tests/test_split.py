@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from legorec.data.renders import (
@@ -85,3 +86,56 @@ def test_kaggle_3062_is_3062b(tmp_path):
     assert image.part == "3062b"
     assert image.name == "3062b Round Brick 1x1"
     assert image.group == "3062_007"
+
+
+def test_extending_a_split_keeps_the_old_groups(tmp_path):
+    from dataclasses import dataclass
+
+    from legorec.data.renders import load_or_create_split, load_split
+
+    @dataclass(frozen=True)
+    class Item:
+        part: str
+        group: str
+
+    path = tmp_path / "split.csv"
+    old = [Item("4073", f"4073_{i}") for i in range(30)]
+    _, first_hash = load_or_create_split(old, path)
+    before = load_split(path)
+
+    new = old + [Item("4073", f"4073_{i}") for i in range(30, 60)]
+    with pytest.raises(ValueError):
+        load_or_create_split(new, path)  # fixed datasets: missing groups are an error
+    per_split, second_hash = load_or_create_split(new, path, extend=True)
+    after = load_split(path)
+
+    assert {g: after[g] for g in before} == before  # nothing moved
+    assert len(after) == 60 and first_hash != second_hash
+    assert sum(len(items) for items in per_split.values()) == 60
+    # the same new groups land in the same split on every computer
+    assert load_or_create_split(new, path, extend=True)[1] == second_hash
+
+
+def test_cut_renders_are_grouped_by_pose_and_checked(tmp_path):
+    from legorec.data.cut_renders import index_cut_renders
+
+    folder = tmp_path / "3005 brick 1x1"
+    folder.mkdir()
+    for name in [
+        "3005_Aqua_0_100.jpeg",
+        "3005_Red_0_100.jpeg",
+        "3005_Light Grey_1_200.jpeg",
+    ]:
+        Image.new("L", (4, 4)).save(folder / name)
+    renders = index_cut_renders(tmp_path)
+    assert [r.group for r in renders] == ["3005_100", "3005_200", "3005_100"]
+    assert {r.name for r in renders} == {"3005 brick 1x1"}
+
+    Image.new("L", (4, 4)).save(folder / "3062b_Red_0_5.jpeg")  # wrong folder
+    with pytest.raises(ValueError, match="another part"):
+        index_cut_renders(tmp_path)
+    # the internet set keeps mould variants in the folder of the brick
+    variant = [
+        r for r in index_cut_renders(tmp_path, strict=False) if "3062b" in r.path
+    ]
+    assert variant[0].part == "3005" and variant[0].group == "3062b_5"

@@ -96,5 +96,6 @@ def _same_content(a: Path, b: Path) -> bool:
 
 def load_or_create_sheet_split(photos: list[SheetPhoto], path=SPLIT_FILE):
     """Split by photo, per part 70 / 15 / 15. Same rules as for the renders:
-    the file is created once, committed, and never regenerated."""
-    return load_or_create_split(photos, path, frac=SPLIT_FRACTIONS)
+    the file is created once and committed. New photos are added to it (by a
+    hash of their name), photos already in it never change their split."""
+    return load_or_create_split(photos, path, frac=SPLIT_FRACTIONS, extend=True)

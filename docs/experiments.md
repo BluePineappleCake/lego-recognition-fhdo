@@ -10,6 +10,7 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 
 **Contents:** [Where we stand](#where-we-stand) ·
 [How to read this log](#how-to-read-this-log) ·
+[2026-11-21](#2026-11-21-whole-pipeline-on-our-test-photos-internet--own-model-size-prior) ·
 [2026-11-20](#2026-11-20-finding-bricks-with-yolo-seg-one-class-brick) ·
 [2026-11-19](#2026-11-19-shape-models-on-our-own-photos) ·
 [2026-11-18 (2)](#2026-11-18-2-training-with-renders--internet-photos) ·
@@ -22,7 +23,7 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 
 ## Where we stand
 
-State after the entry of 2026-11-20. Please update this section when you add
+State after the entry of 2026-11-21. Please update this section when you add
 an entry.
 
 **What we know**
@@ -63,6 +64,16 @@ an entry.
    YOLO-seg model trained from scratch finds every brick of val and test
    (recall 1.0, test mAP50-95 0.916), but its labels come from `find_bricks`:
    whether it separates touching bricks better is still open.
+10. The whole pipeline on our test sheet photos (2026-11-21): 0.56 top-1 per
+    brick with YOLO crops, the same as with crops cut by hand. Finding the
+    bricks is not the bottleneck.
+11. The size in mm from the sheet (long and short side) as a prior on the
+    CNN scores: 0.56 → 0.81–0.82 top-1 on our test photos, no training.
+    What is left is mostly brick vs plate with the same footprint.
+12. A model without Kaggle renders (internet photos + renders, our renders,
+    19 parts) is not better on our photos than renders + internet (0.51 vs
+    0.56 on the 13 common parts, p = 0.39); with the size prior both are at
+    ~0.81.
 
 **Open**
 
@@ -82,14 +93,19 @@ an entry.
 - [x] Evaluate the renders-only and the mixed models on our own photos.
       → 2026-11-19 (all photos, exploration; a frozen test session is
       still missing). The new default model is not set yet.
-- [ ] Class list renders ∪ internet (18 parts), see 2026-11-19.
+- [x] Class list renders ∪ internet (18 parts), see 2026-11-19.
+      → `shape_internet_own`, 19 parts (2026-11-21).
+- [ ] Seeds 1 and 2 for `shape_internet_own` (2026-11-21).
+- [ ] Brick vs plate: photos at ~45° or the shadow width (2026-11-21).
+- [ ] A new photo session as a frozen test (2026-11-21).
 - [ ] YOLO vs `find_bricks` on photos with touching bricks and piles
       (2026-11-20).
 - [ ] Shadows: `brick_mask` counts the shadow as brick. Fix it, then check on
       renders that nothing gets worse (`scripts/check_preprocess.py`).
-- [ ] Size feature on real photos: calibrate `real_scale` (e.g. grey card +
+- [x] Size feature on real photos: calibrate `real_scale` (e.g. grey card +
       fixed camera). The size distribution will differ: renders show random
-      3D poses, real bricks lie flat.
+      3D poses, real bricks lie flat. → 1.28 for sheet crops (2026-11-21);
+      the size prior on the sheet replaces it for now.
 - [ ] Plate 2×2 vs plate 2×2 with 2 studs (13 errors, same size): try
       `size: 128`.
 - [ ] Calibrate the confidences (temperature scaling on val) before using them
@@ -131,6 +147,123 @@ Code versions in the column *Code*:
 | after #13 | training code simplified, mixed precision removed ([#13](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/13)) |
 | mask2 | robust brick mask, `PREPROCESS_VERSION = "mask2"` ([#14](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/14)) |
 | mask2-pad | current code: the crop square is padded at the image edge instead of shifted ([#18](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/18)). First runs: 2026-11-11. |
+
+## 2026-11-21: Whole pipeline on our test photos, internet + own model, size prior
+
+**Question:** How good is the whole pipeline (find bricks → shape CNN) on our
+sheet photos that no model has seen? Does a model without Kaggle renders
+(internet photos and renders + our renders) do better? And does the size of a
+brick in mm, which the sheet gives us for free, fix the length errors?
+
+**Setup:**
+
+- Data: [`scripts/eval_own.py`](../scripts/eval_own.py) `--source yolo` on
+  the **test split** of [`data/splits/sheets.csv`](../data/splits/sheets.csv)
+  (fingerprint `73d77144` after the 3062 → 3062b rename): 54 photos,
+  171 bricks of 19 parts, MIXED left out. The label of every brick is its
+  part folder, so no hand labels are needed; every mask YOLO returns is
+  counted (also a half brick). YOLO was trained on train / val, so only test
+  is a fair number. Comparisons between models use only the parts that all
+  of them know: 13 parts, 37 photos, 148 bricks for the Kaggle models.
+- Old models: renders + internet, contrast stretch, seeds 0–2 (`rydhagpu`,
+  `x32vqyv2`, `p29f3lck`).
+- New model `mil3vhvf` (W&B `summer-glitter-27`, seed 0 only),
+  [`configs/shape_internet_own.yaml`](../configs/shape_internet_own.yaml):
+  no Kaggle renders. Internet photos (2,577 train, 8× per epoch), internet
+  renders (34,465), our renders from `render_ldraw.py` (4,800: 3005, 3062b,
+  4073), and for 4073 the bricks on our train sheet photos (only 4). 19
+  classes; the best epoch is picked on the internet photos (val). New split
+  files `internet_renders.csv` and `own_renders.csv` (80 / 10 / 10 by pose).
+- Size prior ([`legorec.shape.size_prior`](../src/legorec/shape/size_prior.py)):
+  the brick area is warped to 8 px/mm, so every crop has a size in mm. Per
+  part, median and robust spread of log(long side) and log(short side) of
+  the smallest rotated rectangle around the mask, measured on the **train**
+  sheet photos ([`data/reference/part_sizes.csv`](../data/reference/part_sizes.csv),
+  `scripts/size_check.py --table`). Added to the CNN scores as
+  log P(size | part). No training, no tuning on test.
+
+**Result 1: finding bricks is not the bottleneck** (old models, 13 parts,
+37 test photos, mean [min, max] over 3 seeds):
+
+| Crops | Top-1 per crop | Top-1 per photo |
+|---|---|---|
+| cut by hand (`own_crops`, same photos) | 0.562 [0.555, 0.575] | 0.694 |
+| `find_bricks` (threshold) | 0.595 [0.574, 0.615] | 0.748 |
+| YOLO | 0.556 [0.520, 0.581] | 0.721 |
+
+Within the seed ranges: what goes wrong, goes wrong in the CNN.
+
+**Result 2: the new model is not better without size** (YOLO crops, test):
+
+| | `mil3vhvf` (internet + own) | old, 3 seeds |
+|---|---|---|
+| internet photos val (in training data) | 96.0 % (19 classes) | 93.4 % (13 parts) |
+| our test photos, 13 common parts | 0.507 | 0.556 [0.520, 0.581] |
+| our test photos, all 19 parts | 0.556, macro-F1 0.597 | – |
+
+McNemar per photo, `mil3vhvf` vs `rydhagpu`: 4 / 8, p = 0.39. The new parts
+(2654, 3666, 3710, 4073, 6215) are mostly right, but with 2–6 bricks each.
+The errors are the same as before: brick → plate with the same footprint
+(3003 → 3022, 3004 → 3023, 3001 → 3020: 28 of 76) and brick → smaller brick.
+96 % on internet photos but 56 % on ours: the gap is between the internet
+photos and our photos, not between renders and photos.
+
+**Result 3: the size prior** (top-1 per crop, YOLO crops):
+
+| Model | Split | No size | Long side only | Long + short side | Per photo (long + short) |
+|---|---|---|---|---|---|
+| `mil3vhvf` | val | 0.586 | 0.690 | **0.782** | 0.926 |
+| `mil3vhvf` | test | 0.556 | 0.690 | **0.819** | 0.870 |
+| old, 3 seeds | val | 0.500 | 0.699 | **0.787** | 0.895 |
+| old, 3 seeds | test | 0.556 | 0.734 | **0.806** [0.797, 0.824] | 0.937 |
+
+With both sides the errors of `mil3vhvf` on test drop from 76 to 31.
+Left: brick → plate 14 (3003 → 3022: 8, 3004 → 3023: 6), 3003 → 3004: 4.
+A brick measures ~8 % larger than a plate with the same footprint (its top
+is closer to the camera), not enough to separate them.
+
+**Side results:**
+
+- The size-feature model `lydt7czi` on sheet crops (`real_scale` 1.28,
+  render px per sheet px, median over 13 parts on the train photos, 1.16 to
+  1.43 per part): 0.054, the same answers as the renders-only baselines
+  (McNemar 0 / 0). Renders-only models fail on real photos before the size
+  matters; this cannot tell whether the size feature helps.
+- A part without a row in the size table first got 0 (no penalty). For the
+  50-class models, answers then moved to parts without a size: test top-1
+  went up but macro-F1 went down (0.496 → 0.400). Noticed on test; the fix
+  (such parts get the size distribution of all parts) was then checked on
+  val first (macro-F1 0.414 → 0.558) and gives 0.617 on test.
+
+**Conclusion:**
+
+- The sheet is not only for finding bricks: its 8 px/mm make the size of
+  every brick known, and that is worth +23 to +26 pp top-1 on our test
+  photos, without any training. This is the largest gain on real photos so
+  far. The size prior is on by default in `scripts/find_bricks.py`.
+- More internet data does not close the gap to our photos. With the size
+  prior the old and the new model are about equal (0.806 vs 0.819, one seed
+  for the new one).
+- The remaining large error is brick vs plate. From straight above both look
+  alike and measure (almost) alike.
+
+**Careful:**
+
+- `sheets.csv` splits by photo, not by session: the size table and the test
+  photos come from the same sessions (same camera height, same perspective).
+  On a new session the numbers may be lower.
+- 4073 in `mil3vhvf`: only 4 real training bricks, from the same sessions as
+  its 2 test bricks.
+- One seed for `mil3vhvf`.
+
+**Open:**
+
+- Seeds 1 and 2 for `shape_internet_own`.
+- Brick vs plate: photos at ~45° (side wall visible) or the width of the
+  shadow.
+- A new photo session (other day, other light) as a frozen test.
+- More real photos of 4073 and of parts with few bricks (2654, 3009, 3010:
+  7–8 train bricks each in the size table).
 
 ## 2026-11-20: Finding bricks with YOLO-seg (one class "brick")
 
