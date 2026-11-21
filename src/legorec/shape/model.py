@@ -35,7 +35,7 @@ from torch import nn
 
 from legorec.data.renders import canonical_name, canonical_part
 from legorec.shape.augment import normalize
-from legorec.shape.preprocess import preprocess_crop, preprocess_image
+from legorec.shape.preprocess import preprocess_crop, preprocess_images
 from legorec.types import BrickCrop
 
 
@@ -179,6 +179,7 @@ class ShapeClassifier:
         self.size = config["size"]
         self.size_feature = bool(config.get("size_feature", False))
         self.contrast = config.get("contrast", "none")
+        self.mask = config.get("mask", "brick")  # of images without a mask
         self.size_norm = SizeNorm(**saved.get("size_norm", {"mu": 0.0, "sd": 1.0}))
 
         self.model = SmallCNN(
@@ -258,9 +259,12 @@ class ShapeClassifier:
         return self._sheet_scores(crops).numpy()
 
     def _from_images(self, images):
-        """Photos -> (preprocessed arrays, brick sizes in pixels)."""
-        done = [preprocess_image(i, self.size, contrast=self.contrast) for i in images]
-        return [array for array, _ in done], [size for _, size in done]
+        """Photos -> (preprocessed arrays, brick sizes in pixels), with the mask
+        the model was trained with (brick_mask or YOLO)."""
+        arrays, sizes, _ = preprocess_images(
+            images, self.size, self.contrast, self.mask
+        )
+        return arrays, sizes
 
     def _from_crops(self, crops):
         """BrickCrops -> (preprocessed arrays, brick sizes in pixels)."""

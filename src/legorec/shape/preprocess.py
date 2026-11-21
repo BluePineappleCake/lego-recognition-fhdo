@@ -31,6 +31,11 @@ DEFAULT_SIZE = 96  # side length of the classifier input in pixels
 DEFAULT_MARGIN = 0.08  # free space around the brick: 8 % of its size per side
 
 CONTRAST_MODES = ("none", "stretch")
+# where the mask of an image without one comes from: "brick" = brick_mask
+# (colour distance to the border, includes the shadow), "yolo" = the brick
+# finder of the sheet photos (legorec.segment.single_brick_masks), with
+# brick_mask where YOLO finds nothing
+MASK_MODES = ("brick", "yolo")
 STRETCH_BACKGROUND = 128  # grey value of the background in "stretch" mode
 
 
@@ -61,6 +66,39 @@ def preprocess_image(
     box = _bounding_box(mask)
     brick_size = _longest_side(box)
     return _cut_out_square(grey, box, background, size, margin), brick_size
+
+
+def preprocess_images(
+    images, size: int = DEFAULT_SIZE, contrast: str = "none", mask: str = "brick"
+) -> tuple[list[np.ndarray], list[float], int]:
+    """Many images with one brick each -> (arrays, brick sizes in pixels,
+    number of images where YOLO found nothing and brick_mask was used).
+
+    mask="brick": preprocess_image for every image. mask="yolo": YOLO masks
+    (one batch for all images), then preprocess_crop, exactly as for the
+    crops of a sheet photo.
+    """
+    if mask not in MASK_MODES:
+        raise ValueError(f"mask must be one of {MASK_MODES}, not {mask!r}")
+    rgbs = [_to_rgb(image) for image in images]
+    if mask == "brick":
+        done = [preprocess_image(rgb, size, contrast=contrast) for rgb in rgbs]
+        return [a for a, _ in done], [s for _, s in done], 0
+
+    from legorec.segment.bricks import single_brick_masks  # needs ultralytics
+
+    arrays, sizes, fallbacks = [], [], 0
+    for rgb, yolo_mask in zip(rgbs, single_brick_masks(rgbs)):
+        if yolo_mask is None:
+            array, brick_size = preprocess_image(rgb, size, contrast=contrast)
+            fallbacks += 1
+        else:
+            h, w = yolo_mask.shape
+            crop = BrickCrop(rgb, yolo_mask, (0, 0, w, h))
+            array, brick_size = preprocess_crop(crop, size, contrast=contrast)
+        arrays.append(array)
+        sizes.append(brick_size)
+    return arrays, sizes, fallbacks
 
 
 def preprocess_crop(

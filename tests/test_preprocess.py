@@ -147,3 +147,24 @@ def test_flat_brick_and_unknown_mode():
     assert x.shape == (96, 96)
     with pytest.raises(ValueError):
         preprocess_image(a, contrast="equalise")
+
+
+def test_preprocess_images_with_yolo_masks_and_fallback(monkeypatch):
+    from legorec.segment import bricks
+    from legorec.shape.preprocess import preprocess_image, preprocess_images
+
+    image = np.full((60, 80, 3), 200, np.uint8)
+    image[20:40, 20:60] = 40  # the brick
+    image[40:48, 20:60] = 150  # its shadow: brick_mask takes it, YOLO not
+    yolo = np.zeros((60, 80), bool)
+    yolo[20:40, 20:60] = True
+    monkeypatch.setattr(bricks, "single_brick_masks", lambda images: [yolo, None])
+
+    arrays, sizes, fallbacks = preprocess_images([image, image], 32, mask="yolo")
+    assert fallbacks == 1  # second image: YOLO found nothing
+    assert sizes[0] == 40  # the YOLO mask, without the shadow
+    assert np.array_equal(arrays[1], preprocess_image(image, 32)[0])
+    same, _, _ = preprocess_images([image], 32, mask="brick")
+    assert np.array_equal(same[0], arrays[1])
+    with pytest.raises(ValueError):
+        preprocess_images([image], 32, mask="sam")

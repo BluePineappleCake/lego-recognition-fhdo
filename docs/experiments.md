@@ -74,6 +74,9 @@ an entry.
     19 parts) is not better on our photos than renders + internet (0.51 vs
     0.56 on the 13 common parts, p = 0.39); with the size prior both are at
     ~0.81.
+13. Training images cut out by YOLO instead of `brick_mask` (no shadow, as
+    on the sheet): 0.821 → 0.844 on test with the size prior, better in all
+    3 seeds. Default since 2026-11-21 (`mask: yolo`).
 
 **Open**
 
@@ -95,7 +98,9 @@ an entry.
       still missing). The new default model is not set yet.
 - [x] Class list renders ∪ internet (18 parts), see 2026-11-19.
       → `shape_internet_own`, 19 parts (2026-11-21).
-- [ ] Seeds 1 and 2 for `shape_internet_own` (2026-11-21).
+- [x] Seeds 1 and 2 for `shape_internet_own` (2026-11-21).
+- [ ] YOLO on light bricks on a light page (16 % of the internet photos without
+      a YOLO mask), then remove `brick_mask` (2026-11-21).
 - [ ] Brick vs plate: photos at ~45° or the shadow width (2026-11-21).
 - [ ] A new photo session as a frozen test (2026-11-21).
 - [ ] YOLO vs `find_bricks` on photos with touching bricks and piles
@@ -222,6 +227,32 @@ Left: brick → plate 14 (3003 → 3022: 8, 3004 → 3023: 6), 3003 → 3004: 4.
 A brick measures ~8 % larger than a plate with the same footprint (its top
 is closer to the camera), not enough to separate them.
 
+**Result 4: masks from YOLO for the training images** (added the same day).
+The CNN is trained on images that come without a mask (internet photos and
+renders, our renders); so far `brick_mask` cut them out, which keeps the
+shadow. On the sheet photos the CNN gets YOLO masks, without shadow. New
+option `mask: yolo` in the training config: every training image is put on a
+canvas at sheet scale, YOLO cuts it out like a sheet photo, `brick_mask` only
+where YOLO finds nothing (16 % of the internet photos, 1 % of the renders).
+`shape_internet_own`, seeds 0–2 each, YOLO crops of our sheet photos, top-1 per
+brick, mean [min, max]:
+
+| | `brick_mask` (`mil3vhvf`, `2or7y8hx`, `v31pj37r`) | YOLO mask (`ok1tq8ks`, `64ufe2rs`, `8837hoe4`) |
+|---|---|---|
+| val, no size | 0.575 [0.540, 0.598] | **0.636** [0.609, 0.678] |
+| test, no size | 0.595 [0.556, 0.643] | **0.665** [0.637, 0.696] |
+| val, size prior | 0.793 [0.782, 0.805] | **0.862** [0.851, 0.885] |
+| test, size prior | 0.821 [0.819, 0.825] | **0.844** [0.836, 0.860] |
+| test per photo, size prior | 0.895 | **0.920** |
+| internet photos val (in training data) | 95.6–96.2 % | 94.6–95.0 % |
+
+YOLO masks are better in every row and every seed; with the size prior even
+the worst YOLO seed beats the best `brick_mask` seed. McNemar per photo is not
+significant (seed-matched, test with size prior: 3/1, 1/0, 2/1): only 1–8 of
+the 54 test photos differ at all. `mask: yolo` is now the setting of
+`configs/shape_internet_own.yaml`; the three `brick_mask` runs above were
+trained with that file before this change.
+
 **Side results:**
 
 - The size-feature model `lydt7czi` on sheet crops (`real_scale` 1.28,
@@ -242,8 +273,12 @@ is closer to the camera), not enough to separate them.
   photos, without any training. This is the largest gain on real photos so
   far. The size prior is on by default in `scripts/find_bricks.py`.
 - More internet data does not close the gap to our photos. With the size
-  prior the old and the new model are about equal (0.806 vs 0.819, one seed
-  for the new one).
+  prior the old and the new model are about equal (0.806 vs 0.821, 3 seeds
+  each).
+- Training images cut out by YOLO, like the sheet photos, help a little but
+  in every seed: 0.821 → 0.844 on test, 0.793 → 0.862 on val (size prior).
+  Default model: `ok1tq8ks`, the best of the three on val (picked on val,
+  not on test).
 - The remaining large error is brick vs plate. From straight above both look
   alike and measure (almost) alike.
 
@@ -254,11 +289,14 @@ is closer to the camera), not enough to separate them.
   On a new session the numbers may be lower.
 - 4073 in `mil3vhvf`: only 4 real training bricks, from the same sessions as
   its 2 test bricks.
-- One seed for `mil3vhvf`.
+- The model and the size prior were judged on 54 test photos: a difference
+  of 2 pp is within what one new session could change.
 
 **Open:**
 
-- Seeds 1 and 2 for `shape_internet_own`.
+- YOLO finds no brick on 16 % of the internet photos (mostly light bricks on
+  a light background): new sheet photos of exactly that, then retrain YOLO,
+  then `brick_mask` can go.
 - Brick vs plate: photos at ~45° (side wall visible) or the width of the
   shadow.
 - A new photo session (other day, other light) as a frozen test.

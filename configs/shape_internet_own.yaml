@@ -4,13 +4,17 @@
 # of data/splits/sheets.csv; eval_own.py uses the test split).
 # The classes are all parts with training images. The best epoch is picked on
 # the internet photos (val), not on renders: that is what we want to be good at.
+# mask: yolo = the training images get their mask from the YOLO brick finder,
+# as the sheet photos do (brick_mask only where YOLO finds nothing). Better on
+# our photos than brick_mask in all 3 seeds (docs/experiments.md, 2026-11-21).
 size: 96
 width: 32
 size_feature: false
 contrast: stretch
+mask: yolo
 train_on: [internet_photos, internet_renders, own_renders, own_photos]
 own_photo_parts: ["4073"]
 select_on: internet_photos
 real_repeat: 8
 epochs: 30
-tags: [internet+own, contrast]
+tags: [internet+own, contrast, yolo-mask]

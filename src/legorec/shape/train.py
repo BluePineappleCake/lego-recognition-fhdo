@@ -38,7 +38,7 @@ from legorec.paths import (
 )
 from legorec.shape.augment import augment_batch
 from legorec.shape.model import SizeNorm
-from legorec.shape.preprocess import PREPROCESS_VERSION, preprocess_crop
+from legorec.shape.preprocess import MASK_MODES, PREPROCESS_VERSION, preprocess_crop
 
 # where training images can come from (config: train_on)
 SOURCES = (
@@ -61,6 +61,7 @@ class TrainConfig:
     dropout: float = 0.3
     size_feature: bool = False  # also give the network the measured brick size
     contrast: str = "none"  # "stretch": stretch the contrast per brick (preprocess.py)
+    mask: str = "brick"  # "yolo": masks of the training images from the brick finder
     size_noise: float = 0.05  # relative noise on the brick size during training
     epochs: int = 30
     batch_size: int = 128
@@ -108,6 +109,8 @@ class TrainConfig:
 
     def check(self) -> None:
         """Settings that cannot work together are an error before any data loads."""
+        if self.mask not in MASK_MODES:
+            raise ValueError(f"mask must be one of {MASK_MODES}, not {self.mask!r}")
         unknown = set(self.train_on) - set(SOURCES)
         if unknown or not self.train_on:
             raise ValueError(f"train_on: {self.train_on}; sources are {SOURCES}")
@@ -169,11 +172,17 @@ def _preprocess_cached(items_per_split, prefix, split_hash, config) -> SourceDat
     later (load_training_data), so one cache serves every class list.
     """
     cache_tag = f"{config.size}_{PREPROCESS_VERSION}_{config.contrast}_{split_hash}"
+    if config.mask == "yolo":  # another brick model gives other masks
+        from legorec.segment.bricks import brick_model_id
+
+        cache_tag += f"_yolo{brick_model_id()}"
     splits, names = {}, {}
     for split in ("train", "val", "test"):
         items = items_per_split.get(split, [])
         cache_file = processed_dir() / f"{prefix}_{split}_{cache_tag}.npz"
-        x, sizes_px = build_cache(items, config.size, cache_file, config.contrast)
+        x, sizes_px = build_cache(
+            items, config.size, cache_file, config.contrast, config.mask
+        )
         splits[split] = (x, sizes_px, [item.part for item in items])
         names |= {item.part: item.name for item in items}
     return SourceData(splits, names, split_hash)

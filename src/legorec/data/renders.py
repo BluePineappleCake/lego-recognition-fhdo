@@ -30,7 +30,7 @@ import numpy as np
 from PIL import Image
 
 from legorec.paths import SPLITS_DIR
-from legorec.shape.preprocess import preprocess_image
+from legorec.shape.preprocess import preprocess_images
 
 # "3001 brick 2x4 123L" -> name "3001 brick 2x4", pose "123", camera "L"
 FILE_NAME_PATTERN = re.compile(r"^(?P<name>.+?)\s+(?P<pose>\d+)(?P<camera>[LR]?)$")
@@ -209,7 +209,12 @@ def load_or_create_split(
 
 
 def build_cache(
-    items: list[RenderImage], size: int, cache_file, contrast: str = "none"
+    items: list[RenderImage],
+    size: int,
+    cache_file,
+    contrast: str = "none",
+    mask: str = "brick",
+    chunk: int = 512,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Preprocess all images once and store them on disk; later calls load the file.
 
@@ -226,15 +231,21 @@ def build_cache(
         cached = np.load(cache_file)
         return cached["x"], cached["px"]
 
-    images, sizes = [], []
-    for image in items:
-        array, brick_size = preprocess_image(
-            Image.open(image.path), size, contrast=contrast
-        )
-        images.append(array)
-        sizes.append(brick_size)
+    images, sizes, fallbacks = [], [], 0
+    for start in range(0, len(items), chunk):  # not all images in memory at once
+        loaded = [Image.open(item.path) for item in items[start : start + chunk]]
+        arrays, brick_sizes, n = preprocess_images(loaded, size, contrast, mask)
+        images += arrays
+        sizes += brick_sizes
+        fallbacks += n
+    if mask == "yolo":
+        print(f"[cache] {cache_file.name}: YOLO found no brick in {fallbacks} of "
+              f"{len(items)} images, brick_mask used there")  # fmt: skip
 
-    x = np.stack(images)
+    if not images:
+        x = np.zeros((0, size, size), np.uint8)
+    else:
+        x = np.stack(images)
     px = np.array(sizes, dtype=np.float32)
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     np.savez(cache_file, x=x, px=px)
