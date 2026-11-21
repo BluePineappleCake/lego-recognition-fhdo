@@ -132,6 +132,16 @@ def save_checkpoint(path, model, parts, names, config, split_hash, size_norm) ->
     )
 
 
+def load_checkpoint(path, device: str = "cpu") -> dict:
+    """Read a checkpoint written by save_checkpoint.
+
+    weights_only=True: only tensors and plain Python values (dicts, lists,
+    numbers, strings) are unpickled, never code. A downloaded checkpoint cannot
+    run anything on our machines, and save_checkpoint stores nothing else.
+    """
+    return torch.load(path, map_location=device, weights_only=True)
+
+
 class ShapeClassifier:
     """A trained model plus everything needed to use it on new images.
 
@@ -150,7 +160,7 @@ class ShapeClassifier:
         device: str = "cpu",
         real_scale: float | None = None,
     ):
-        saved = torch.load(checkpoint, map_location=device, weights_only=False)
+        saved = load_checkpoint(checkpoint, device)
         config = saved["cfg"]
 
         # part numbers in the order of the outputs; older checkpoints say "3062"
@@ -178,6 +188,9 @@ class ShapeClassifier:
     @torch.no_grad()
     def _scores(self, arrays, sizes_px, batch_size=256) -> torch.Tensor:
         """Preprocessed arrays + sizes -> raw model scores (N x parts), on the CPU."""
+        if not arrays:
+            # e.g. the segmentation found no brick on a photo
+            return torch.empty(0, len(self.parts))
         out = []
         for start in range(0, len(arrays), batch_size):
             batch = arrays[start : start + batch_size]

@@ -104,8 +104,13 @@ an entry.
 - **Top-1:** share of test images where the model's first guess is right.
   **pp** = percentage points.
 - **Length errors:** test images where the model mixed up two parts that
-  differ mainly in length, like 1×3 and 1×4 (the pairs are listed in
-  `LENGTH_PAIRS` in [`metrics.py`](../src/legorec/eval/metrics.py)).
+  differ only in length, like brick 1×3 and 1×4: same family and width,
+  different length (`PART_GEOMETRY` / `LENGTH_PAIRS` in
+  [`metrics.py`](../src/legorec/eval/metrics.py)). **Changed on 2026-11-21:**
+  before, the list was collected from the errors of the first baseline run
+  (17 pairs, some of them look-alikes such as brick 1×1 / slope 2×1). All
+  length-error numbers in entries up to 2026-11-20 use that old list and are
+  not comparable with newer ones.
   **Other errors:** all other wrong answers. Both are counts out of 4,000
   images. Example: 115 + 137 = 252 errors means 93.7 % top-1.
 - **Run:** the W&B run. Newer entries use the run id (`hki5v89j`), older ones

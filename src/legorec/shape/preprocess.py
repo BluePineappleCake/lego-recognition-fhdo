@@ -214,9 +214,13 @@ def _to_grey(image) -> np.ndarray:
 
     array = np.asarray(image)
     if array.ndim == 3:
-        # same weights as PIL's "L" mode (ITU-R 601-2)
-        red, green, blue = array[..., 0], array[..., 1], array[..., 2]
-        array = red * 0.299 + green * 0.587 + blue * 0.114
+        # exactly PIL's "L" mode (ITU-R 601-2 weights in 16-bit fixed point,
+        # rounded), so a photo gives the same grey values whether it arrives
+        # as a PIL image (renders) or as a numpy array (BrickCrop)
+        rgb = array[..., :3].astype(np.int32)
+        array = (
+            rgb[..., 0] * 19595 + rgb[..., 1] * 38470 + rgb[..., 2] * 7471 + 0x8000
+        ) >> 16
     return array.astype(np.int16)
 
 

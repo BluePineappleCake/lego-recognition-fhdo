@@ -5,31 +5,55 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
-# Pairs of parts that differ mainly in length or size, collected in the first
-# error analysis (docs/experiments.md). Used to check whether the size feature
-# helps where it should. A few pairs are look-alikes rather than pure length
-# variants, e.g. 3005 (brick 1x1) / 3040 (slope 2x1). Pairs are unordered.
+# Footprint of the parts that come in several lengths: family, width, length
+# (in studs, as in the LEGO name; for slopes "2 x 3" = 2 deep, 3 wide).
+# Includes parts that are not among the 50 Kaggle classes yet but in our own
+# data (3009, 3710, 3666).
+PART_GEOMETRY = {
+    "3005": ("brick", 1, 1),
+    "3004": ("brick", 1, 2),
+    "3622": ("brick", 1, 3),
+    "3010": ("brick", 1, 4),
+    "3009": ("brick", 1, 6),
+    "3003": ("brick", 2, 2),
+    "3002": ("brick", 2, 3),
+    "3001": ("brick", 2, 4),
+    "4490": ("arch", 1, 3),
+    "3659": ("arch", 1, 4),
+    "3024": ("plate", 1, 1),
+    "3023": ("plate", 1, 2),
+    "3623": ("plate", 1, 3),
+    "3710": ("plate", 1, 4),
+    "3666": ("plate", 1, 6),
+    "3022": ("plate", 2, 2),
+    "3021": ("plate", 2, 3),
+    "3020": ("plate", 2, 4),
+    "3070": ("tile", 1, 1),
+    "3069": ("tile", 1, 2),
+    "3040": ("slope 45", 2, 1),
+    "3039": ("slope 45", 2, 2),
+    "3038": ("slope 45", 2, 3),
+    "3037": ("slope 45", 2, 4),
+    "4286": ("slope 33", 3, 1),
+    "3298": ("slope 33", 3, 2),
+    "54200": ("slope 30", 1, 1),
+    "85984": ("slope 30", 1, 2),
+    "41677": ("liftarm thin", 1, 2),
+    "6632": ("liftarm thin", 1, 3),
+    "18654": ("liftarm thick", 1, 1),
+    "43857": ("liftarm thick", 1, 2),
+}
+
+# Pairs of parts that differ only in length: same family and width, different
+# length (3004 brick 1x2 / 3010 brick 1x4). Defined from the geometry, not from
+# the errors a model makes, so the size feature is judged on a fixed set.
+# Look-alikes of other kinds (3005 brick 1x1 / 3040 slope 2x1) are not length
+# errors. Pairs are unordered.
 LENGTH_PAIRS = {
-    frozenset(p)
-    for p in [
-        ("3010", "3622"),
-        ("3001", "3002"),
-        ("3069", "3070"),
-        ("3020", "3021"),
-        ("3659", "4490"),
-        ("3023", "3024"),
-        ("3004", "3622"),
-        ("3002", "3003"),
-        ("3021", "3022"),
-        ("3037", "3038"),
-        ("3039", "3298"),
-        ("3004", "3005"),
-        ("3068", "3069"),
-        ("3024", "3794"),
-        ("3005", "3040"),
-        ("3070", "54200"),
-        ("3040", "3045"),
-    ]
+    frozenset((a, b))
+    for a, (family_a, width_a, length_a) in PART_GEOMETRY.items()
+    for b, (family_b, width_b, length_b) in PART_GEOMETRY.items()
+    if family_a == family_b and width_a == width_b and length_a != length_b
 }
 
 

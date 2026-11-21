@@ -72,3 +72,27 @@ def test_missing_model_gives_a_helpful_error(tmp_path, monkeypatch):
     monkeypatch.setenv("LEGOREC_SHAPE_MODEL", str(tmp_path / "does_not_exist.pt"))
     with pytest.raises(FileNotFoundError, match="LEGOREC_SHAPE_MODEL"):
         shape_predict.predict(_crop_with_two_bricks())
+
+
+def test_photo_without_bricks_gives_an_empty_list(tmp_path):
+    from legorec.shape.model import ShapeClassifier
+
+    classifier = ShapeClassifier(_save_tiny_checkpoint(tmp_path / "shape.pt"))
+    assert classifier.predict([]) == []
+    assert classifier.scores([]).shape == (0, len(PARTS))
+
+
+def test_checkpoint_of_a_real_run_loads_without_pickled_code(tmp_path):
+    """train_shape.py saves asdict(TrainConfig); load_checkpoint only accepts
+    plain values (weights_only=True), so every setting must be one."""
+    from dataclasses import asdict
+
+    from legorec.shape.model import load_checkpoint
+    from legorec.shape.train import TrainConfig
+
+    model = SmallCNN(len(PARTS), width=8)
+    path = tmp_path / "run.pt"
+    names = {p: f"brick {p}" for p in PARTS}
+    config = asdict(TrainConfig(width=8))
+    save_checkpoint(path, model, PARTS, names, config, "test", SizeNorm(5.0, 0.3))
+    assert load_checkpoint(path)["cfg"] == config
