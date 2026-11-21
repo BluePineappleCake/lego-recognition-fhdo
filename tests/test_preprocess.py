@@ -2,7 +2,12 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from legorec.shape.preprocess import brick_mask, preprocess_crop, preprocess_image
+from legorec.shape.preprocess import (
+    _to_grey,
+    brick_mask,
+    preprocess_crop,
+    preprocess_image,
+)
 from legorec.types import BrickCrop
 
 
@@ -147,3 +152,9 @@ def test_flat_brick_and_unknown_mode():
     assert x.shape == (96, 96)
     with pytest.raises(ValueError):
         preprocess_image(a, contrast="equalise")
+
+
+def test_grey_is_the_same_for_pil_image_and_numpy_array():
+    """Renders arrive as PIL images, segmentation crops as numpy arrays."""
+    rgb = np.random.default_rng(0).integers(0, 256, (64, 64, 3), dtype=np.uint8)
+    assert np.array_equal(_to_grey(rgb), _to_grey(Image.fromarray(rgb)))

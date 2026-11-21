@@ -39,11 +39,11 @@ from legorec.eval.metrics import (
     top1_among,
 )
 from legorec.paths import MODELS_DIR, own_crops_dir, processed_dir
-from legorec.shape.model import ShapeClassifier
+from legorec.shape.model import ShapeClassifier, load_checkpoint
 
 
 def variant_and_seed(checkpoint: Path) -> tuple[str, int]:
-    cfg = torch.load(checkpoint, map_location="cpu", weights_only=False)["cfg"]
+    cfg = load_checkpoint(checkpoint)["cfg"]
     tags = "+".join(t for t in cfg.get("tags") or [] if t != "contrast")
     return f"{tags or 'untagged'}/{cfg.get('contrast') or 'none'}", cfg.get("seed")
 

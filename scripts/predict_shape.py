@@ -28,6 +28,7 @@ import numpy as np
 import torch
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+from legorec.eval.metrics import classification_metrics
 from legorec.shape.model import ShapeClassifier
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
@@ -138,11 +139,11 @@ def main():
         return classifier.names.get(part, part)
 
     rows = []
-    n_labelled, n_top1_right, n_top3_right = 0, 0, 0
+    labelled = []  # (index of the image, label) for labels the model knows
     unknown_labels = set()
 
-    for (file, label), top_3, crop, size_px in zip(
-        photos, top_3_per_image, crops, sizes_px
+    for i, ((file, label), top_3, crop, size_px) in enumerate(
+        zip(photos, top_3_per_image, crops, sizes_px)
     ):
         rows.append((file.name, label, top_3, crop, size_px))
         guesses = ", ".join(f"{readable(part)} {prob:.0%}" for part, prob in top_3)
@@ -154,18 +155,20 @@ def main():
             unknown_labels.add(label)
             mark = "-- "
         else:
-            n_labelled += 1
-            n_top1_right += best_part == label
-            n_top3_right += label in [part for part, _ in top_3]
+            labelled.append((i, label))
             mark = "OK " if best_part == label else "XX "
 
         print(f"{mark:4s}{file.name:30s} {size_px:6.0f}px  {guesses}")
 
-    if n_labelled:
+    if labelled:
+        # the same metrics as for renders (legorec.eval.metrics)
+        scores = classifier.scores([images[i] for i, _ in labelled])
+        y = np.array([classifier.parts.index(label) for _, label in labelled])
+        m = classification_metrics(scores, y)
         print(
-            f"\n{n_labelled} labelled images: "
-            f"top-1 {n_top1_right / n_labelled:.1%}, "
-            f"top-3 {n_top3_right / n_labelled:.1%}"
+            f"\n{len(labelled)} labelled images: "
+            f"top-1 {m['top1']:.1%}, top-3 {m['top3']:.1%}, "
+            f"macro-F1 {m['macro_f1']:.3f}"
         )
     if unknown_labels:
         print(

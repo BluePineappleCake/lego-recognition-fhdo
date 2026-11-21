@@ -2,6 +2,8 @@ import numpy as np
 import pytest
 
 from legorec.eval.metrics import (
+    LENGTH_PAIRS,
+    PART_GEOMETRY,
     classification_metrics,
     error_breakdown,
     group_top1,
@@ -65,3 +67,15 @@ def test_mcnemar_counts_only_the_disagreements():
     assert (only_a, only_b) == (10, 0)
     assert p == pytest.approx(2 / 2**10)
     assert mcnemar_p(a, a)[2] == 1.0
+
+
+def test_length_pairs_come_from_the_geometry():
+    assert frozenset(("3004", "3010")) in LENGTH_PAIRS  # brick 1x2 / 1x4
+    assert frozenset(("3023", "3623")) in LENGTH_PAIRS  # plate 1x2 / 1x3
+    assert frozenset(("3004", "3003")) not in LENGTH_PAIRS  # 1x2 / 2x2: width
+    assert frozenset(("3005", "3040")) not in LENGTH_PAIRS  # brick / slope
+    for pair in LENGTH_PAIRS:
+        (family_a, width_a, _), (family_b, width_b, _) = (
+            PART_GEOMETRY[part] for part in pair
+        )
+        assert family_a == family_b and width_a == width_b
