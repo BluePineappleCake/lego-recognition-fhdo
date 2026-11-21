@@ -19,6 +19,7 @@ explained in the [Glossary](#glossary).
 [Get the data](#get-the-data) ·
 [Train the shape classifier](#train-the-shape-classifier) ·
 [Try a model on your own photos](#try-a-model-on-your-own-photos) ·
+[Find and name the bricks on a sheet photo](#find-and-name-the-bricks-on-a-sheet-photo) ·
 [Use the shape model in code](#use-the-shape-model-in-code) ·
 [Code tour](#code-tour) ·
 [Working together](#working-together) ·
@@ -32,9 +33,9 @@ Photo → Find bricks → Shape (CNN) + Colour → Inventory → "What can I bui
 
 | Step | What happens | Approach | Status |
 |---|---|---|---|
-| Capture | We photograph the bricks | Fixed camera, even light, grey card in every photo | planned |
-| Find bricks | Each brick is found and cut out | OpenCV contours for separated bricks; YOLO-seg for piles (stretch goal: only if time allows) | planned |
-| Shape | Each cut-out gets a part number, e.g. 3001 = brick 2×4 | CNN on greyscale cut-outs, trained on renders, fine-tuned on real photos | **v0 trained**, see [Where we are](#where-we-are) |
+| Capture | We photograph the bricks | Bricks on a printed capture sheet (template v2) with 4 ArUco markers, so every photo can be warped flat to the same scale (8 px/mm) | **in use**: 246 sheet photos of 19 parts |
+| Find bricks | Each brick is found and cut out | `find_bricks` (colour difference to the local background) or a YOLO-seg model with one class "brick", trained by us from scratch | **works on separated bricks**; touching bricks and piles still open |
+| Shape | Each cut-out gets a part number, e.g. 3001 = brick 2×4 | CNN on greyscale cut-outs, trained on renders and internet photos | **v0 trained**, see [Where we are](#where-we-are) |
 | Colour | Each brick gets a LEGO colour | White balance with the grey card, then the nearest measured LEGO colour | planned |
 | Inventory | Everything is counted | Part, colour, count + confidence | planned |
 | Sets | We compare the inventory with official sets | Coverage and missing parts per set, using Rebrickable part lists | planned |
@@ -50,17 +51,24 @@ it back?
 
 ## Where we are
 
-From the [experiment log](docs/experiments.md) (last entry: 2026-11-05):
+From the [experiment log](docs/experiments.md) (last entry: 2026-11-20):
 
-- **The shape classifier v0 works on renders:** about 94.5 % top-1, i.e. about
-  945 of 1,000 test renders (images it has never seen) get the right part
-  number. Two runs with the same settings can differ by about 1 percentage
-  point, so smaller differences between two variants do not mean anything yet.
-- **First real photos:** the *contrast stretch* variant did better than the
-  baseline, although it is worse on renders. This was a first exploration,
-  not the final test.
-- **Default model:** the contrast-stretch model, for now.
-- **Everything else** (finding bricks, colour, inventory, sets) is planned.
+- **Shape on renders:** about 94.5 % top-1, i.e. about 945 of 1,000 test
+  renders (images it has never seen) get the right part number. Two runs with
+  the same settings can differ by about 1 percentage point, so smaller
+  differences between two variants do not mean anything yet.
+- **Shape on real photos:** the render-to-real gap is huge. Trained on renders
+  only, the model gets 13 % of the bricks on our own photos right (contrast
+  stretch; the greyscale baseline 6 %). Adding the internet photos to training
+  lifts this to 49 %. The most frequent error is a brick vs a plate with the
+  same footprint: from above the height is hard to see.
+- **Finding bricks:** `find_bricks` and our YOLO-seg model both find every
+  separated brick on the test photos. Whether YOLO is better on touching
+  bricks is not measured yet.
+- **Default model:** the contrast-stretch model trained on renders only, for
+  now. The model with internet photos is better on real photos but not the
+  default yet.
+- **Not started:** colour, inventory, sets.
 
 Open questions and next steps are at the top of the
 [experiment log](docs/experiments.md).
@@ -71,7 +79,7 @@ Open questions and next steps are at the top of the
 |---|---|---|
 | Experiment tracking | [W&B project `lego-fhdo/lego-recognition`](https://forge.coreweave.com/wandb/lego-fhdo/lego-recognition) | team members – ask for an invite to the W&B team `lego-fhdo` |
 | Training data (renders) | [Kaggle: Images of LEGO Bricks](https://www.kaggle.com/datasets/joosthazelzet/lego-brick-images) | public |
-| Our photos | private Kaggle dataset (link follows) | team members |
+| Our photos | private Kaggle dataset `gonsterenjoyer/lego-sheet-photos`, see [`data/README.md`](data/README.md) | team members (added as collaborators) |
 | Part and set lists | [Rebrickable downloads](https://rebrickable.com/downloads/) | public |
 | Experiment log | [`docs/experiments.md`](docs/experiments.md) | – |
 | Where the data goes | [`data/README.md`](data/README.md) | – |
@@ -118,9 +126,9 @@ install. The words in brackets are optional extras:
 | Extra | Adds | You need it for |
 |---|---|---|
 | `dev` | pytest, ruff, pre-commit, nbstripout, scikit-learn | tests and code style (everyone) |
-| `train` | PyTorch, torchvision, timm, W&B | training and using the model (already installed on Kaggle) |
-| `docs` | matplotlib | the class overview figures (the PDF table also needs `pip install reportlab`) |
-| `app` | Streamlit | the app (planned) |
+| `train` | PyTorch, torchvision, W&B | training and using the model (already installed on Kaggle) |
+| `detect` | Ultralytics | finding the bricks with YOLO-seg (`--method yolo`, the default of `find_bricks.py`) |
+| `docs` | matplotlib, reportlab | the class overview figures and the PDF table |
 
 **4. Check that it works:**
 
@@ -150,11 +158,10 @@ shows the folder layout and how to download everything.
 
 **Which bricks are in the renders?** `scripts/class_overview.py` draws all 50
 classes with example renders (PNG/PDF/CSV). `scripts/class_overview_pdf.py`
-makes a PDF table with notes on look-alikes. Both need the `docs` extra, the
-PDF table also needs `reportlab`:
+makes a PDF table with notes on look-alikes. Both need the `docs` extra:
 
 ```powershell
-pip install -e ".[docs]" reportlab
+pip install -e ".[docs]"
 python scripts/class_overview_pdf.py --data data/raw/renders/dataset --out docs/figures/classes_table.pdf
 ```
 
@@ -163,18 +170,22 @@ python scripts/class_overview_pdf.py --data data/raw/renders/dataset --out docs/
 ## Train the shape classifier
 
 The shape classifier is a small CNN. It looks at the grey 96 × 96 cut-out of
-one brick and answers with a part number. So far it is trained on renders only.
+one brick and answers with a part number. It is trained on the renders; with
+`real_train: internet` (e.g. `configs/shape_contrast_internet.yaml`) the train
+split of the internet photos is added.
 
 **What one training run does** (`scripts/train_shape.py`):
 
-1. It reads the config and loads the preprocessed renders. The very first run
-   preprocesses all 40,000 images once (a few minutes) and caches them in
+1. It reads the config and loads the preprocessed renders and, if they are in
+   `data/raw/internet/`, the internet photos. The very first run preprocesses
+   all 40,000 renders once (a few minutes) and caches them in
    `data/processed/`.
 2. It starts a run in W&B and logs a few training images, so you can see what
    the network sees.
 3. It trains for 30 epochs. After every epoch it checks the validation set and
    keeps the checkpoint with the best validation macro-F1.
-4. It tests this best checkpoint once on the render test set.
+4. It tests this best checkpoint once on the render test set and on the
+   internet photos (val split).
 
 Result: the checkpoint `models/shape_<run id>.pt` on your disk, the same file as
 W&B artifact `shape-cnn`, and all curves and numbers in W&B.
@@ -216,6 +227,7 @@ One run takes about 4–5 minutes on an RTX 4080.
 |---|---|
 | `--config` | YAML file in `configs/` (required) |
 | `--data` | folder that directly contains the 40,000 PNGs (default: `data/raw/renders/dataset/`) |
+| `--internet-data` | folder with `photos/` of the internet dataset (default: `data/raw/internet/`; skipped if missing) |
 | `--seed` | random seed, e.g. `--seed 1` (default: 0) |
 | `--epochs` | number of epochs, overrides the config |
 | `--sanity` | run only the sanity check |
@@ -274,10 +286,32 @@ python scripts/predict_shape.py --checkpoint models/shape_<run id>.pt my_photos/
   next to its answer. Look at it first – a bad crop explains most bad
   predictions.
 - If a folder has subfolders named after part numbers (`my_photos/3001/a.jpg`
-  …), they are used as labels and the script reports top-1 and top-3
-  accuracy.
+  …), they are used as labels and the script reports top-1, top-3 and
+  macro-F1 (the same metrics as for the renders).
 - Size-feature models also need `--real_scale`. The docstring at the top of the
   script explains a rough calibration.
+
+## Find and name the bricks on a sheet photo
+
+`scripts/find_bricks.py` runs the first steps of the pipeline on photos of the
+capture sheet: warp the photo flat, find every brick, and give each one a part
+number with the shape model.
+
+```powershell
+python scripts/find_bricks.py data/raw/own_photos/MIXED*/IMG_8844.jpg
+python scripts/find_bricks.py photo.jpg --method threshold   # find_bricks instead of YOLO
+python scripts/find_bricks.py photo.jpg --no-shape           # only find the bricks
+```
+
+- It writes the photo with numbered outlines and one crop per brick to
+  `data/processed/find_bricks/`, and prints one line per brick.
+- `--method yolo` (the default) needs the `detect` extra and the YOLO model in
+  `models/bricks_yolo.pt` (or the file in `LEGOREC_BRICK_MODEL`).
+- The part numbers come from `models/shape.pt` (or `--shape-model`).
+
+To evaluate shape models on real photos: `scripts/eval_internet.py` (internet
+photos) and `scripts/eval_own.py` (crops of our own photos). Both explain at
+the top what they report.
 
 ## Use the shape model in code
 
@@ -293,6 +327,7 @@ part, confidence = predict(crop)  # e.g. ("3001", 0.93)
 - `confidence` is the model's probability for its answer (0 to 1). It is **not
   calibrated** yet: on real photos the model can be wrong with 70–80 %
   confidence.
+- A photo without bricks: `ShapeClassifier.predict([])` returns `[]`.
 - The model is loaded from `models/shape.pt`, or from the file named in the
   environment variable `LEGOREC_SHAPE_MODEL`.
 - The checkpoint stores its preprocessing settings (e.g. `contrast`), so
@@ -315,32 +350,58 @@ current default.
 ## Code tour
 
 ```
-src/legorec/     reusable code; so far data/, shape/ and eval/
-                 (planned: segmentation, colour, inventory, sets)
-configs/         one YAML file per experiment
+src/legorec/     reusable code: data/, segment/, shape/, eval/
+                 (planned: colour, inventory, sets)
+configs/         one YAML file per training experiment
 data/splits/     versioned train/val/test file lists
+data/labels/     versioned labels corrected by hand (YOLO)
 notebooks/       exploration only, named NN_initials_topic.ipynb
-scripts/         training, evaluation and overview figures
+scripts/         command-line tools: training, evaluation, labelling, figures
 tests/           pytest tests; they also show how each function is called
 docs/            experiment log and progress presentations
 ```
 
+Every file starts with a docstring that explains the idea behind it.
+
 ### Where to start reading
 
-The shape step, in the order the data flows through it:
+**Finding the bricks**, from the photo to the crops:
+
+| File | What it does |
+|---|---|
+| `src/legorec/segment/sheet.py` | finds the 4 ArUco markers, warps the brick area flat (`brick_area`), `find_bricks` with the local background colour |
+| `src/legorec/segment/bricks.py` | `bricks_on_sheet(photo)`: one `BrickCrop` per brick, with YOLO-seg or `find_bricks` |
+| `src/legorec/segment/yolo.py` | YOLO segmentation labels (one class "brick") |
+| `src/legorec/types.py` | `BrickCrop`, the data passed from one step to the next |
+
+**The shape step**, in the order the data flows through it:
 
 | File | What it does |
 |---|---|
 | `src/legorec/data/renders.py` | finds the Kaggle renders, splits them by pose, caches the preprocessed images |
+| `src/legorec/data/internet.py` | the internet photos: index, split by capture |
+| `src/legorec/data/sheets.py`, `own.py` | our sheet photos and the hand-checked crops of them |
 | `src/legorec/shape/preprocess.py` | one brick image → 96 × 96 grey crop + measured size (the same code for renders and photos) |
 | `src/legorec/shape/augment.py` | random rotation, zoom, shift and lighting for every training batch |
 | `src/legorec/shape/model.py` | the CNN with the optional size input, checkpoints, `ShapeClassifier` for new images |
-| `src/legorec/shape/train.py` | `TrainConfig` (all settings), one training epoch, evaluation |
+| `src/legorec/shape/train.py` | `TrainConfig` (all settings), data loading, one training epoch, evaluation |
 | `scripts/train_shape.py` | puts it together: data → W&B run → training → test |
-| `src/legorec/eval/metrics.py` | top-1, top-3, macro-F1, length errors |
+| `src/legorec/eval/metrics.py` | top-1, top-3, macro-F1, length errors, McNemar test |
 | `src/legorec/shape/predict.py` | `predict(crop)`, the interface for the other pipeline steps |
 
-Every file starts with a docstring that explains the idea behind it.
+**Scripts** (each explains its options at the top):
+
+| Script | What it does |
+|---|---|
+| `find_bricks.py` | sheet photo → bricks with outlines and part numbers |
+| `train_shape.py` | train the shape CNN |
+| `predict_shape.py` | shape model on photos with one brick each |
+| `eval_internet.py`, `eval_own.py` | shape models on the internet photos / our own crops |
+| `export_yolo.py`, `cvat_labels.py`, `show_labels.py` | YOLO labels: export, correct by hand in CVAT, check by eye |
+| `internet_split.py` | index the internet photos, create or check their split |
+| `render_ldraw.py` | our own renders from the LDraw library (Blender) |
+| `class_overview.py`, `class_overview_pdf.py` | overview figures of the 50 render classes |
+| `size_check.py`, `check_preprocess.py` | checks of the brick size and of the brick detection on renders |
 
 ## Working together
 
@@ -398,7 +459,7 @@ Every file starts with a docstring that explains the idea behind it.
 | Augmentation | Random changes to the training images (rotation, zoom, shift, lighting), so the model learns the brick and not the exact picture. |
 | OneCycle | A learning-rate schedule: the learning rate first goes up, then down to almost 0 at the end of training. |
 | Label smoothing | The training target for the right part is about 0.9 instead of 1 (setting `label_smoothing: 0.1`). |
-| Length errors | Confusions between parts that differ mainly in length, like 1×3 and 1×4. The pairs are listed in `LENGTH_PAIRS` in `src/legorec/eval/metrics.py`. |
+| Length errors | Confusions between parts that differ only in length, like brick 1×3 and 1×4. The pairs follow from `PART_GEOMETRY` in `src/legorec/eval/metrics.py` (same family and width, different length). |
 | Size feature | Resizing to 96 × 96 removes the real size of a brick. With `size_feature: true`, the measured size (in pixels) is an extra input to the network. |
 | `real_scale` | Converts brick sizes from photo pixels to render pixels. Only needed for size-feature models on photos. |
 | Contrast stretch | The option `contrast: stretch`: the grey values of each brick are spread over the full range 0–255. Idea: in greyscale a red brick is almost black. |
