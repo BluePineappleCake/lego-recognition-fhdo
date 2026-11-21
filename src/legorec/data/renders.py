@@ -9,6 +9,12 @@ File names look like "3001 brick 2x4 123L.png":
 Every pose was rendered by two cameras, and the two images are almost
 identical. If one were in training and the other in the test set, the test
 would be far too easy. So we split by pose ("group" below), not by image.
+
+The Kaggle set calls the round brick 1x1 "3062". Its model has a hollow stud,
+so it is 3062b (3062a has a solid stud), and that is the number everywhere
+else (our photos, our renders, the internet photos, Rebrickable). The part of
+a render is therefore 3062b; its group keeps the Kaggle number ("3062_123"),
+so renders.csv and its fingerprint stay the same.
 """
 
 import csv
@@ -31,13 +37,27 @@ FILE_NAME_PATTERN = re.compile(r"^(?P<name>.+?)\s+(?P<pose>\d+)(?P<camera>[LR]?)
 
 SPLIT_FILE = SPLITS_DIR / "renders.csv"
 
+# Kaggle part number -> real part number (see the module docstring)
+KAGGLE_PARTS = {"3062": "3062b"}
+
+
+def canonical_part(part: str) -> str:
+    """Part number as used in the rest of the project: "3062" -> "3062b"."""
+    return KAGGLE_PARTS.get(part, part)
+
+
+def canonical_name(name: str) -> str:
+    """Same for a name: "3062 Round Brick 1x1" -> "3062b Round Brick 1x1"."""
+    part, _, rest = name.partition(" ")
+    return f"{canonical_part(part)} {rest}".strip()
+
 
 @dataclass(frozen=True)
 class RenderImage:
     path: str  # full path of the PNG file
     part: str  # part number = the label, e.g. "3001"
     name: str  # part number + name, e.g. "3001 brick 2x4"
-    group: str  # part + pose, e.g. "3001_123"; the same for camera L and R
+    group: str  # Kaggle part + pose, e.g. "3001_123"; the same for camera L and R
 
 
 def index_renders(root: str | Path) -> list[RenderImage]:
@@ -55,8 +75,10 @@ def index_renders(root: str | Path) -> list[RenderImage]:
             continue
 
         name = match["name"].strip()  # "3001 brick 2x4"
-        part = name.split()[0]  # "3001"
-        group = f"{part}_{match['pose']}"  # "3001_123"
+        kaggle_part = name.split()[0]  # "3001"
+        part = canonical_part(kaggle_part)
+        name = canonical_name(name)
+        group = f"{kaggle_part}_{match['pose']}"  # "3001_123"
         images.append(RenderImage(str(file), part, name, group))
 
     if unreadable_names:
