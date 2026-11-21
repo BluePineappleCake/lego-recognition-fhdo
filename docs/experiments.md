@@ -30,7 +30,9 @@ Since 2026-11-21 `main` only keeps the way the team's model is trained
 (`shape_internet_own`). Runs with Kaggle renders, the size feature, without
 contrast stretch or with `brick_mask` training images need the code of the
 Git tag `v1-legacy`; their configs and `data/splits/renders.csv` are there
-too.
+too. The same holds for the colour-threshold finder `find_bricks` and the
+evaluation on the hand-checked crops (`eval_own.py --source crops`): the
+bricks are found by YOLO only.
 
 **What we know**
 
@@ -110,7 +112,10 @@ too.
 - [ ] Brick vs plate: photos at ~45° or the shadow width (2026-11-21).
 - [ ] A new photo session as a frozen test (2026-11-21).
 - [ ] YOLO vs `find_bricks` on photos with touching bricks and piles
-      (2026-11-20).
+      (2026-11-20). `find_bricks` is in the Git tag `v1-legacy`.
+- [ ] Correct the uncorrected val / test sheet photos in CVAT (`export_yolo.py`
+      lists them first in `review.csv`). Until then, the YOLO mAP on val /
+      test is measured against drafts, not against the truth (2026-11-21).
 - [ ] Shadows: `brick_mask` counts the shadow as brick. Fix it, then check on
       renders that nothing gets worse (`scripts/check_preprocess.py`, removed
       on 2026-11-21, in the Git history). Partly done: training images now
@@ -169,7 +174,8 @@ Code versions in the column *Code*:
 | mask2 | robust brick mask, `PREPROCESS_VERSION = "mask2"` ([#14](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/14)) |
 | mask2-pad | the crop square is padded at the image edge instead of shifted ([#18](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/18)). First runs: 2026-11-11. All runs of 2026-11-21 use it. |
 | mask2-pad-grey | numpy images (sheet crops, and with `mask: yolo` the training images) get exactly PIL's grey values instead of values up to 1 lower ([#36](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/36)). Caches are rebuilt; no run with it yet. |
-| one way | current code, same `PREPROCESS_VERSION`: only the way of `shape_internet_own` is left (Kaggle renders, size feature, `contrast: none`, `brick_mask` training images and their settings removed; tag `v1-legacy`). The scores of `ok1tq8ks` are unchanged, bit for bit (9 sheet crops, 4 internet photos). A new run with the same seed is not bit-identical to before: the removed size-noise step drew random numbers. Cache names changed, caches are rebuilt. |
+| one way | same `PREPROCESS_VERSION`: only the way of `shape_internet_own` is left (Kaggle renders, size feature, `contrast: none`, `brick_mask` training images and their settings removed; tag `v1-legacy`). The scores of `ok1tq8ks` are unchanged, bit for bit (9 sheet crops, 4 internet photos). A new run with the same seed is not bit-identical to before: the removed size-noise step drew random numbers. Cache names changed, caches are rebuilt. |
+| yolo only | current code: the colour-threshold finder (`find_bricks`, `--method threshold`, `--source threshold`) and the hand-checked crops (`--source crops`, `data/raw/own_crops`) are gone (tag `v1-legacy`); `eval_own.py` only evaluates the whole pipeline on the sheet photos. `export_yolo.py` drafts labels with YOLO instead of `find_bricks`. Results of `ok1tq8ks` unchanged (0.830 top-1 on test with the size prior). |
 
 ## 2026-11-21: Whole pipeline on our test photos, internet + own model, size prior
 
@@ -263,6 +269,11 @@ brick, mean [min, max]:
 | test, size prior | 0.821 [0.819, 0.825] | **0.844** [0.836, 0.860] |
 | test per photo, size prior | 0.895 | **0.920** |
 | internet photos val (in training data) | 95.6–96.2 % | 94.6–95.0 % |
+
+On the current code (after [#36](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/36),
+measured 2026-11-21, the same with tag `v1-legacy` and with `main`),
+`ok1tq8ks` gets 0.830 top-1 on test with the size prior (0.907 per photo),
+one brick fewer than in the table, which was measured before #36.
 
 YOLO masks are better in every row and every seed; with the size prior even
 the worst YOLO seed beats the best `brick_mask` seed. McNemar per photo is not

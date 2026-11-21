@@ -1,27 +1,19 @@
-"""Evaluate shape models on our own photos.
+"""Evaluate shape models on our own sheet photos: the whole pipeline.
 
-    python scripts/eval_own.py                     # data/raw/own_crops, all models
-    python scripts/eval_own.py --models models/shape_rydhagpu.pt
-    python scripts/eval_own.py --source yolo       # whole pipeline, test photos
-    python scripts/eval_own.py --source threshold  # same with find_bricks
+    python scripts/eval_own.py --size-prior            # all models, test photos
+    python scripts/eval_own.py --size-prior --models models/shape_ok1tq8ks.pt
+    python scripts/eval_own.py --size-prior --split val
 
-Two kinds of input (--source):
+The sheet photos of one split (data/raw/own_photos, data/splits/sheets.csv)
+are cut by bricks_on_sheet (YOLO), as in the real pipeline. Every brick on a
+photo of a part folder is that part, so no labelling is needed (MIXED photos
+are left out). Whatever YOLO finds is counted, also a half brick or a
+shadow: photo to part number, end to end. Missed bricks do not show up here
+(see export_yolo.py). Default --split test: YOLO was trained on train / val
+photos.
 
-    crops       data/raw/own_crops: cut with the first find_bricks, bad crops
-                removed by hand. The shape model alone, on clean crops; fixed,
-                so numbers stay comparable over time.
-    yolo /      the sheet photos (data/raw/own_photos) cut by bricks_on_sheet,
-    threshold   as in the real pipeline. Every brick on a photo of a part
-                folder is that part, so no labelling is needed (MIXED photos
-                are left out). Whatever the segmentation finds is counted,
-                also a half brick or a shadow: photo to part number, end to
-                end. Missed bricks do not show up here (see export_yolo.py).
-                Default --split test: YOLO was trained on train / val photos.
-
-To compare the two on the same photos: --source crops --split test.
-
---size-prior (yolo / threshold): also weigh the measured size of every brick
-in mm (legorec.shape.size_prior). Run once with and once without it.
+--size-prior: also weigh the measured size of every brick in mm
+(legorec.shape.size_prior). Run once with and once without it.
 
 Only crops of parts that every evaluated model knows are used (pass --models
 to evaluate one model on all of its parts). Crops of one photo are not
@@ -37,23 +29,24 @@ shows mean and range over the seeds of a variant. Then per part and per
 session, and an exact McNemar test per photo between seed-matched models of
 two variants.
 
-Predictions: $LEGOREC_PROCESSED/eval_own_<model>.csv (eval_own_<source>_<model>.csv
-for yolo / threshold).
+Predictions: $LEGOREC_PROCESSED/eval_own[_size]_<split>_<model>.csv.
 Older models that need the Git tag v1-legacy are skipped.
 """
 
 import argparse
 import csv
-import re
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import torch
-from PIL import Image
 
-from legorec.data.own import OwnCrop, index_own_crops, photo_sessions
-from legorec.data.sheets import index_sheet_photos, load_or_create_sheet_split
+from legorec.data.sheets import (
+    index_sheet_photos,
+    load_or_create_sheet_split,
+    photo_sessions,
+)
 from legorec.eval.metrics import (
     classification_metrics,
     group_top1,
@@ -61,7 +54,7 @@ from legorec.eval.metrics import (
     softmax,
     top1_among,
 )
-from legorec.paths import MODELS_DIR, own_crops_dir, own_photos_dir, processed_dir
+from legorec.paths import MODELS_DIR, own_photos_dir, processed_dir
 from legorec.shape.model import (
     ShapeClassifier,
     load_checkpoint,
@@ -71,98 +64,84 @@ from legorec.shape.model import (
 from legorec.shape.size_prior import SizePrior
 
 
+@dataclass(frozen=True)
+class Brick:
+    """One brick found on a sheet photo, with the part of its photo."""
+
+    path: str  # photo path + "#" + number of the brick on it
+    part: str
+    folder: str
+    group: str  # the photo
+    session: str
+
+
 def variant_and_seed(checkpoint: Path) -> tuple[str, int]:
     cfg = load_checkpoint(checkpoint)["cfg"]
     tags = [t for t in cfg.get("tags") or [] if t not in ("contrast", "yolo-mask")]
     return "+".join(tags) or "untagged", cfg.get("seed")
 
 
-def sheet_photos_per_split():
-    """{"train": [...], "val": [...], "test": [...]} of our sheet photos."""
-    photos = index_sheet_photos(own_photos_dir())
-    return load_or_create_sheet_split(photos)[0]
-
-
-def photos_of(photos_per_split, split):
-    """The photos of one split ("all": every photo)."""
-    return [
-        photo
-        for name, in_split in photos_per_split.items()
-        if split in ("all", name)
-        for photo in in_split
-    ]
-
-
-def own_crops(folder, split, known):
-    """The hand-checked crops -> (crops, their images, skipped folder names)."""
-    all_crops = index_own_crops(folder)
-    if split != "all":  # sheet photo groups look like "3001_IMG_3415"
-        groups = {photo.group for photo in photos_of(sheet_photos_per_split(), split)}
-        all_crops = [c for c in all_crops if f"{c.part}_{c.group}" in groups]
-    crops = [c for c in all_crops if c.part in known]
-    skipped = {c.name for c in all_crops} - {c.name for c in crops}
-    images = [Image.open(c.path).convert("RGB") for c in crops]
-    return crops, images, skipped
-
-
-def sheet_crops(method, split, known):
+def sheet_bricks(split, known):
     """Cut the sheet photos of `split` with bricks_on_sheet.
 
-    Returns (crops, their BrickCrops, skipped folder names).
+    Returns (Bricks, their BrickCrops, skipped folder names).
     """
     import cv2
 
     from legorec.segment import bricks_on_sheet
 
-    photos_per_split = sheet_photos_per_split()
-    every_photo = photos_of(photos_per_split, "all")
-    chosen = photos_of(photos_per_split, split)
+    photos = index_sheet_photos(own_photos_dir())
+    photos_per_split = load_or_create_sheet_split(photos)[0]
+    chosen = [
+        photo
+        for name, in_split in photos_per_split.items()
+        if split in ("all", name)
+        for photo in in_split
+    ]
     skipped = {p.folder for p in chosen if p.part not in known}  # MIXED too
     chosen = sorted((p for p in chosen if p.part in known), key=lambda p: p.group)
 
-    # sessions from all photos, so they are the same as for --source crops
-    number = {p.group: int(re.search(r"IMG_(\d+)", p.group)[1]) for p in every_photo}
-    session_of = photo_sessions(sorted(set(number.values())))
-    crops, inputs, no_markers, empty = [], [], [], []
+    session_of = photo_sessions(photos)  # from all photos: the same for every split
+    bricks, crops, no_markers, empty = [], [], [], []
     for photo in chosen:
         try:
-            found = bricks_on_sheet(cv2.imread(photo.path), method)
+            found = bricks_on_sheet(cv2.imread(photo.path))
         except ValueError:
             no_markers.append(photo.group)
             continue
         if not found:
             empty.append(photo.group)
-        for k, brick in enumerate(found, start=1):
-            session = session_of[number[photo.group]]
-            crops.append(
-                OwnCrop(
-                    f"{photo.path}#{k}", photo.part, photo.folder, photo.group, session
+        for k, crop in enumerate(found, start=1):
+            bricks.append(
+                Brick(
+                    f"{photo.path}#{k}",
+                    photo.part,
+                    photo.folder,
+                    photo.group,
+                    session_of[photo.group],
                 )
             )
-            inputs.append(brick)
-    print(f"[data] {method} on {len(chosen)} {split} photos")
+            crops.append(crop)
+    print(f"[data] YOLO on {len(chosen)} {split} photos")
     if no_markers:
         print(f"[warn] markers not found, photo left out: {', '.join(no_markers)}")
     if empty:
         print(f"[warn] no brick found (counts as nothing): {', '.join(empty)}")
-    if split != "test" and method == "yolo":
+    if split != "test":
         print(
             "[warn] YOLO was trained on train / val photos: finding is too easy there"
         )
-    return crops, inputs, skipped
+    return bricks, crops, skipped
 
 
-def evaluate(checkpoint, crops, inputs, device, size_prior=None):
+def evaluate(checkpoint, bricks, crops, device, size_prior=None):
     classifier = ShapeClassifier(checkpoint, device=device, size_prior=size_prior)
     parts = classifier.parts
-    y = np.array([parts.index(crop.part) for crop in crops])
-    if isinstance(inputs[0], Image.Image):
-        scores = classifier.scores(inputs)
-    else:
-        scores = classifier.crop_scores(inputs)
+    y = np.array([parts.index(brick.part) for brick in bricks])
+    scores = classifier.crop_scores(crops)
     m = classification_metrics(scores, y)
     m["top1_k"] = top1_among(scores, y, sorted(set(y)))
-    photo_right = group_top1(scores, y, [crop.group for crop in crops])
+    photo_right = group_top1(scores, y, [brick.group for brick in bricks])
     m["photo_top1"] = float(np.mean(list(photo_right.values())))
     pred = scores.argmax(axis=1)
     probabilities = softmax(scores)
@@ -172,49 +151,32 @@ def evaluate(checkpoint, crops, inputs, device, size_prior=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--source",
-        choices=["crops", "yolo", "threshold"],
-        default="crops",
-        help="hand-checked crops, or the sheet photos cut by bricks_on_sheet",
-    )
-    parser.add_argument(
-        "--data",
-        default=str(own_crops_dir()),
-        help="--source crops: one subfolder per part (default: data/raw/own_crops)",
-    )
-    parser.add_argument(
         "--split",
         choices=["test", "val", "train", "all"],
-        default=None,
-        help="photos of this split of sheets.csv (default: all for crops, "
-        "test for yolo / threshold; same split = same photos, comparable)",
+        default="test",
+        help="photos of this split of sheets.csv (same split = same photos, comparable)",
     )
     parser.add_argument(
         "--size-prior",
         action="store_true",
-        help="yolo / threshold: also weigh the measured size in mm "
+        help="also weigh the measured size in mm "
         "(data/reference/part_sizes.csv, from the train photos)",
     )
     parser.add_argument("--models", nargs="*", default=None)
     args = parser.parse_args()
-    if args.size_prior and args.source == "crops":
-        parser.error("--size-prior needs a sheet source (yolo / threshold)")
     size_prior = SizePrior.load() if args.size_prior else None
 
     checkpoints = usable_checkpoints(
         args.models or sorted(MODELS_DIR.glob("shape_*.pt"))  # shape.pt: a copy
     )
     known = parts_known_by_all(checkpoints)
-    if args.source == "crops":
-        crops, inputs, skipped = own_crops(args.data, args.split or "all", known)
-    else:
-        crops, inputs, skipped = sheet_crops(args.source, args.split or "test", known)
-    if not crops:
-        raise SystemExit("no crops of a part that every model knows")
+    bricks, crops, skipped = sheet_bricks(args.split, known)
+    if not bricks:
+        raise SystemExit("no bricks of a part that every model knows")
     print(
-        f"[data] {len(crops)} crops from {len({c.group for c in crops})} photos, "
-        f"{len({c.part for c in crops})} parts, sessions: "
-        f"{', '.join(sorted({c.session for c in crops}))}"
+        f"[data] {len(bricks)} crops from {len({b.group for b in bricks})} photos, "
+        f"{len({b.part for b in bricks})} parts, sessions: "
+        f"{', '.join(sorted({b.session for b in bricks}))}"
     )
     print(
         f"[data] not known by every model, skipped: {', '.join(sorted(skipped)) or '-'}\n"
@@ -225,7 +187,7 @@ def main():
     for checkpoint in checkpoints:
         run = checkpoint.stem.removeprefix("shape_")
         classifier, m, pred, prob, y, photo_right = evaluate(
-            checkpoint, crops, inputs, device, size_prior
+            checkpoint, bricks, crops, device, size_prior
         )
         variant, seed = variant_and_seed(checkpoint)
         results[run] = {
@@ -238,14 +200,13 @@ def main():
             "names": classifier.names,
             "photo_right": photo_right,
         }
-        prefix = "eval_own" if args.source == "crops" else f"eval_own_{args.source}"
-        prefix += "_size" if size_prior else ""
-        out = processed_dir() / f"{prefix}_{run}.csv"
+        prefix = "eval_own_size" if size_prior else "eval_own"
+        out = processed_dir() / f"{prefix}_{args.split}_{run}.csv"
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file, lineterminator="\n")
             writer.writerow(["path", "photo", "session", "part", "pred", "prob"])
-            for c, p, pr in zip(crops, pred, prob.max(axis=1)):
+            for c, p, pr in zip(bricks, pred, prob.max(axis=1)):
                 writer.writerow(
                     [
                         c.path,
@@ -281,12 +242,12 @@ def main():
         print(f"  {variant:<28} n={len(runs)}  " + "   ".join(cells))
 
     print("\nTop-1 per part (crops), mean over seeds of each variant:")
-    parts_present = sorted({c.part for c in crops})
+    parts_present = sorted({b.part for b in bricks})
     names = next(iter(results.values()))["names"]
     variants = sorted(by_variant)
     print(f"  {'part':<26}{'n':>5}" + "".join(f"{v[:24]:>26}" for v in variants))
     for part in parts_present:
-        idx = np.array([c.part == part for c in crops])
+        idx = np.array([b.part == part for b in bricks])
         row = []
         for v in variants:
             row.append(
@@ -301,8 +262,8 @@ def main():
         print(f"  {label:<26}{idx.sum():>5}" + "".join(f"{a:>26.2f}" for a in row))
 
     print("\nTop-1 per session (crops), mean over seeds:")
-    for session in sorted({c.session for c in crops}):
-        idx = np.array([c.session == session for c in crops])
+    for session in sorted({b.session for b in bricks}):
+        idx = np.array([b.session == session for b in bricks])
         row = [
             np.mean(
                 [

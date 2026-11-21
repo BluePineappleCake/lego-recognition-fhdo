@@ -24,11 +24,6 @@ def data_dir() -> Path:
     return Path(os.environ.get("LEGOREC_DATA", REPO_ROOT / "data"))
 
 
-def own_crops_dir() -> Path:
-    """Single-brick crops of our sheet photos, checked by hand (eval_own.py)."""
-    return data_dir() / "raw" / "own_crops"
-
-
 def own_photos_dir() -> Path:
     """Our own sheet photos, one subfolder per part (see data/README.md)."""
     return data_dir() / "raw" / "own_photos"

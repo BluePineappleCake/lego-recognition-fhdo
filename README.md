@@ -33,7 +33,7 @@ Photo → Find bricks → Shape (CNN) + Colour → Inventory → "What can I bui
 | Step | What happens | Approach | Status |
 |---|---|---|---|
 | Capture | We photograph the bricks | Bricks on a printed capture sheet (template v2) with 4 ArUco markers, so every photo can be warped flat to the same scale (8 px/mm) | **in use**: 246 sheet photos of 19 parts |
-| Find bricks | Each brick is found and cut out | A YOLO-seg model with one class "brick", trained by us from scratch (the old colour threshold `find_bricks` is still there) | **in use** on separated bricks; touching bricks and piles still open |
+| Find bricks | Each brick is found and cut out | A YOLO-seg model with one class "brick", trained by us from scratch (the old colour threshold is in the Git tag `v1-legacy`) | **in use** on separated bricks; touching bricks and piles still open |
 | Shape | Each cut-out gets a part number, e.g. 3001 = brick 2×4 | CNN on greyscale cut-outs, trained on internet photos and renders plus our own renders; the size of the brick in mm (known from the sheet) weighs the answer | **in use**: 84 % of the bricks on our test photos right, see [Where we are](#where-we-are) |
 | Colour | Each brick gets a LEGO colour | White balance with the grey card, then the nearest measured LEGO colour | planned |
 | Inventory | Everything is counted | Part, colour, count + confidence | planned |
@@ -131,7 +131,7 @@ install. The words in brackets are optional extras:
 |---|---|---|
 | `dev` | pytest, ruff, pre-commit, nbstripout, scikit-learn | tests and code style (everyone) |
 | `train` | PyTorch, torchvision, W&B, Ultralytics | training and using the model (YOLO cuts out the training images) |
-| `detect` | Ultralytics | finding the bricks with YOLO-seg (`--method yolo`, the default of `find_bricks.py`) |
+| `detect` | Ultralytics | finding the bricks with YOLO-seg (`find_bricks.py`, `eval_own.py`, `export_yolo.py`) |
 | `docs` | matplotlib | the notebooks in `notebooks/` |
 
 **4. Check that it works:**
@@ -265,13 +265,12 @@ number with the shape model.
 
 ```powershell
 python scripts/find_bricks.py data/raw/own_photos/MIXED*/IMG_8844.jpg
-python scripts/find_bricks.py photo.jpg --method threshold   # find_bricks instead of YOLO
 python scripts/find_bricks.py photo.jpg --no-shape           # only find the bricks
 ```
 
 - It writes the photo with numbered outlines and one crop per brick to
   `data/processed/find_bricks/`, and prints one line per brick.
-- `--method yolo` (the default) needs the `detect` extra and the YOLO model in
+- Finding the bricks needs the `detect` extra and the YOLO model in
   `models/bricks_yolo.pt` (or the file in `LEGOREC_BRICK_MODEL`).
 - The part numbers come from `models/shape.pt` (or `--shape-model`), weighed
   by the measured size of every brick in mm (the **size prior**, table
@@ -282,8 +281,8 @@ python scripts/find_bricks.py photo.jpg --no-shape           # only find the bri
 To evaluate shape models on real photos:
 
 ```powershell
-python scripts/eval_own.py --source yolo --size-prior --models models/shape_ok1tq8ks.pt  # whole pipeline, our test photos
-python scripts/eval_internet.py                                                          # internet photos, val split
+python scripts/eval_own.py --size-prior --models models/shape_ok1tq8ks.pt  # whole pipeline, our test photos
+python scripts/eval_internet.py                                             # internet photos, val split
 ```
 
 Both explain at the top what they report. `eval_own.py` uses the test split of
@@ -349,8 +348,8 @@ Every file starts with a docstring that explains the idea behind it.
 
 | File | What it does |
 |---|---|
-| `src/legorec/segment/sheet.py` | finds the 4 ArUco markers, warps the brick area flat (`brick_area`), `find_bricks` with the local background colour |
-| `src/legorec/segment/bricks.py` | `bricks_on_sheet(photo)`: one `BrickCrop` per brick, with YOLO-seg or `find_bricks` |
+| `src/legorec/segment/sheet.py` | finds the 4 ArUco markers, warps the brick area flat (`brick_area`) |
+| `src/legorec/segment/bricks.py` | `bricks_on_sheet(photo)`: one `BrickCrop` per brick, found by YOLO-seg |
 | `src/legorec/segment/yolo.py` | YOLO segmentation labels (one class "brick") |
 | `src/legorec/types.py` | `BrickCrop`, the data passed from one step to the next |
 
@@ -361,7 +360,7 @@ Every file starts with a docstring that explains the idea behind it.
 | `src/legorec/data/splits.py` | train / val / test files in `data/splits/`, the same for the whole team |
 | `src/legorec/data/renders.py` | the renders (internet set, our LDraw renders): index, split by pose |
 | `src/legorec/data/internet.py` | the internet photos: index, split by capture |
-| `src/legorec/data/sheets.py`, `own.py` | our sheet photos and the hand-checked crops of them |
+| `src/legorec/data/sheets.py` | our sheet photos: index, split by photo, sessions |
 | `src/legorec/shape/preprocess.py` | one brick image → 96 × 96 grey crop (the same code for renders and photos) |
 | `src/legorec/shape/augment.py` | random rotation, zoom, shift and lighting for every training batch |
 | `src/legorec/shape/model.py` | the CNN, checkpoints, `ShapeClassifier` for new images |

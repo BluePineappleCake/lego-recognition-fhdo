@@ -2,9 +2,8 @@
 prior (legorec.shape.size_prior).
 
     python scripts/size_check.py
-    python scripts/size_check.py --method threshold
 
-Every brick on the train sheet photos is found with the brick finder; its long
+Every brick on the train sheet photos is found by YOLO (bricks_on_sheet); its long
 and short side in mm (smallest rotated rectangle around the mask, 8 px/mm)
 are collected per part. Median and spread go to data/reference/part_sizes.csv.
 Train photos only, so the test photos stay unseen. MIXED photos are left out
@@ -18,7 +17,7 @@ from collections import defaultdict
 import numpy as np
 
 
-def train_sheet_crops(method: str) -> dict[str, list]:
+def train_sheet_crops() -> dict[str, list]:
     """Every brick on the train sheet photos (BrickCrops), per part."""
     import cv2
 
@@ -31,22 +30,19 @@ def train_sheet_crops(method: str) -> dict[str, list]:
     crops_per_part = defaultdict(list)
     for photo in train:
         if photo.part != "MIXED":
-            crops_per_part[photo.part] += bricks_on_sheet(
-                cv2.imread(photo.path), method
-            )
+            crops_per_part[photo.part] += bricks_on_sheet(cv2.imread(photo.path))
     return crops_per_part
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--method", default="yolo", choices=["yolo", "threshold"])
-    args = parser.parse_args()
-
+    argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    ).parse_args()  # only for --help
     from legorec.shape.size_prior import PX_PER_MM, TABLE, SizePrior, dimensions_px
 
     mm = {
         part: [np.array(dimensions_px(crop)) / PX_PER_MM for crop in crops]
-        for part, crops in train_sheet_crops(args.method).items()
+        for part, crops in train_sheet_crops().items()
     }
     prior = SizePrior.fit(mm)
     prior.save()
