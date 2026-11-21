@@ -9,9 +9,10 @@ Versioned are `data/splits/`, `data/labels/` and `data/reference/`.
 ```
 data/
 ├── raw/
-│   ├── renders/        Kaggle render dataset (unzipped, unchanged)
+│   ├── renders/        Kaggle render dataset (unzipped; dataset/ is used)
 │   ├── own_photos/     our own photos of the capture sheet (Kaggle, section 2)
 │   ├── own_crops/      single-brick crops of them, checked by hand (eval_own.py)
+│   ├── own_single_photos/  our photos of single bricks, not on the sheet (2a)
 │   ├── internet/       internet photos and renders (section 2b)
 │   ├── own_renders/    our renders from LDraw (scripts/render_ldraw.py)
 │   ├── labels/         CVAT exports for our photos
@@ -64,10 +65,12 @@ kaggle datasets download -d gonsterenjoyer/lego-sheet-photos -p data/raw/own_pho
 
 **Add photos:** put them into the right part folder (new part: new folder,
 name like `3009 brick 1x6`, the code refuses other names), then upload a new
-version:
+version. Run it inside the folder: with `-p data/raw/own_photos` the Kaggle
+CLI fails on Windows (it builds a temp file name from the path).
 
 ```
-kaggle datasets version -p data/raw/own_photos --dir-mode zip -m "s03: touching bricks"
+cd data/raw/own_photos
+kaggle datasets version -p . --dir-mode zip -m "s03: touching bricks"
 ```
 
 Never rename or delete existing photos. `--dir-mode zip` is needed, without
@@ -80,7 +83,7 @@ a version.
 1. `kaggle datasets init -p data/raw/own_photos`, then set `title` and
    `id` (`gonsterenjoyer/lego-sheet-photos`, no underscores) in
    `dataset-metadata.json`
-2. `kaggle datasets create -p data/raw/own_photos --dir-mode zip`
+2. in `data/raw/own_photos`: `kaggle datasets create -p . --dir-mode zip`
    (private by default)
 3. on kaggle.com: dataset → Settings → Sharing → add the team's Kaggle
    usernames
@@ -95,6 +98,10 @@ thrown away. The `.jpg` files are whole photos cropped by hand.
 `scripts/eval_own.py` uses this folder to test shape models on our own photos.
 This hand check cannot be redone, so keep the folder as it is.
 
+`data/raw/own_single_photos/<part folder>/`: photos of a single brick taken
+without the capture sheet (so far 14 of 4073). Not used by any script yet;
+they are kept apart so the internet loader only sees internet photos.
+
 ## 2b. Internet photos (extra real data)
 
 Source: tbd (name, link and licence also go into `Quellen.txt`).
@@ -104,7 +111,8 @@ or pass the folder with `--data`.
 - `photos/<part folder>/`: 3,683 real photos of 18 parts, one brick per
   image, tightly cropped. 13 parts are among our 50 render classes; the other
   5 (2654, 3009, 3666, 3710, 6215) are not.
-- `renders/`: ~44,000 coloured renders of the same 18 parts. Not used yet.
+- `renders/`: ~44,000 coloured renders of 17 of these parts (no 3062b).
+  Not used yet. Our own renders go to `own_renders/`, not here.
 - The label is the folder name. A file name like
   `c1_5_pcsp_original_3001_1609710513579.jpg` means camera 1 of capture
   `5_pcsp_original_3001_1609710513579`: all cameras of a capture show the
