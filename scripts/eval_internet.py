@@ -4,12 +4,11 @@
     python scripts/eval_internet.py --models models/shape_56b289he.pt models/shape_hki5v89j.pt
     python scripts/eval_internet.py --split test          # only for final numbers!
 
-Only parts that every evaluated model knows are used (13 for the Kaggle
-models; pass --models to evaluate one model on all of its parts). Reported
-per model:
+Only parts that every evaluated model knows are used (pass --models to
+evaluate one model on all of its parts). Reported per model:
 
     top1 / top3 / macro_f1 / conf   as for the renders (the model may answer
-                                    any of its parts, e.g. 50 for Kaggle)
+                                    any of its parts)
     top1_k       best guess among the k parts that occur in these photos only
                  (how much of the error is "answered a part that is not here")
     capture_top1 one answer per capture: mean probability over its cameras
@@ -20,13 +19,11 @@ one capture show the same brick, so images are not independent. The test on
 captures is the honest one; the one on images is too optimistic.
 
 Predictions are written to $LEGOREC_PROCESSED/eval_internet_<split>_<model>.csv.
-Size-feature models are skipped: the photos are tightly cropped, so the brick
-size in pixels means nothing here.
+Older models that need the Git tag v1-legacy are skipped.
 """
 
 import argparse
 import csv
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -43,7 +40,11 @@ from legorec.eval.metrics import (
     top1_among,
 )
 from legorec.paths import MODELS_DIR, internet_dir, processed_dir
-from legorec.shape.model import ShapeClassifier, parts_known_by_all
+from legorec.shape.model import (
+    ShapeClassifier,
+    parts_known_by_all,
+    usable_checkpoints,
+)
 
 
 def main():
@@ -59,9 +60,8 @@ def main():
     photos_per_split, split_hash = load_or_create_photo_split(
         index_photos(args.data or internet_dir())
     )
-    checkpoints = args.models or sorted(
-        p
-        for p in MODELS_DIR.glob("shape_*.pt")  # shape.pt is a copy of one of them
+    checkpoints = usable_checkpoints(
+        args.models or sorted(MODELS_DIR.glob("shape_*.pt"))  # shape.pt: a copy
     )
     photos = only_parts(photos_per_split[args.split], parts_known_by_all(checkpoints))
     images = [Image.open(photo.path).convert("RGB") for photo in photos]
@@ -74,14 +74,10 @@ def main():
 
     results = {}  # model -> per image right?, per capture right?
     rows = []
-    for checkpoint in map(Path, checkpoints):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    for checkpoint in checkpoints:
         run = checkpoint.stem.removeprefix("shape_")
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        try:
-            classifier = ShapeClassifier(checkpoint, device=device)
-        except ValueError:
-            print(f"[skip] {run}: size-feature model, brick size meaningless here")
-            continue
+        classifier = ShapeClassifier(checkpoint, device=device)
 
         parts = classifier.parts
         y = np.array([parts.index(photo.part) for photo in photos])
@@ -101,7 +97,7 @@ def main():
         pred = scores.argmax(axis=1)
         metrics |= error_breakdown(y, pred, parts)
         results[run] = (pred == y, capture_right)
-        rows.append((run, classifier.contrast, metrics))
+        rows.append((run, metrics))
 
         out = processed_dir() / f"eval_internet_{args.split}_{run}.csv"
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -122,14 +118,14 @@ def main():
         print()
 
     header = (
-        f"{'model':<10}{'contrast':<10}{'top1':>7}{'top3':>7}{'top1_k':>9}"
+        f"{'model':<10}{'top1':>7}{'top3':>7}{'top1_k':>9}"
         f"{'capture':>9}{'mF1':>7}{'conf':>7}{'len err':>9}{'other':>7}"
     )
     print(header)
     print("-" * len(header))
-    for run, contrast, m in rows:
+    for run, m in rows:
         print(
-            f"{run:<10}{contrast:<10}{m['top1']:>7.1%}{m['top3']:>7.1%}"
+            f"{run:<10}{m['top1']:>7.1%}{m['top3']:>7.1%}"
             f"{m['top1_k']:>9.1%}{m['capture_top1']:>9.1%}{m['macro_f1']:>7.3f}"
             f"{m['conf']:>7.2f}{m['errors_length']:>9}{m['errors_other']:>7}"
         )

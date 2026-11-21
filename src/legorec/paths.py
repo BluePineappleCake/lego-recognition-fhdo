@@ -24,11 +24,6 @@ def data_dir() -> Path:
     return Path(os.environ.get("LEGOREC_DATA", REPO_ROOT / "data"))
 
 
-def renders_dir() -> Path:
-    """Folder that directly contains the 40,000 render PNGs."""
-    return data_dir() / "raw" / "renders" / "dataset"
-
-
 def own_crops_dir() -> Path:
     """Single-brick crops of our sheet photos, checked by hand (eval_own.py)."""
     return data_dir() / "raw" / "own_crops"

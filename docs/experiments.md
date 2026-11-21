@@ -26,6 +26,12 @@ Unknown term? See [How to read this log](#how-to-read-this-log).
 State after the entry of 2026-11-21. Please update this section when you add
 an entry.
 
+Since 2026-11-21 `main` only keeps the way the team's model is trained
+(`shape_internet_own`). Runs with Kaggle renders, the size feature, without
+contrast stretch or with `brick_mask` training images need the code of the
+Git tag `v1-legacy`; their configs and `data/splits/renders.csv` are there
+too.
+
 **What we know**
 
 1. Baseline and size-feature runs reach 93.7–95.5 % top-1 on the render test
@@ -118,6 +124,8 @@ an entry.
 - [ ] Calibrate the confidences (temperature scaling on val) before using them
       to flag unsure bricks.
 - [ ] Store `PREPROCESS_VERSION` in the checkpoints and warn on a mismatch.
+      Partly done: new checkpoints store `"format": 2`, and older ones of
+      another kind are refused (`check_supported` in `model.py`).
 
 ## How to read this log
 
@@ -139,8 +147,9 @@ an entry.
 - **Run:** the W&B run. Newer entries use the run id (`hki5v89j`), older ones
   the random run name (`wobbly-feather-2`). The checkpoint of a run is
   `models/shape_<run id>.pt`.
-- **Config:** baseline, size feature or contrast stretch, i.e. the files in
-  [`configs/`](../configs/).
+- **Config:** the files in [`configs/`](../configs/). The older ones
+  (baseline, size feature, contrast stretch, `shape_contrast_internet`) are
+  in the Git tag `v1-legacy`.
 - **Code:** which version of the code trained the model, see the table below.
   Preprocessing and training changed in between, so runs from different code
   versions are not perfectly comparable.
@@ -159,7 +168,8 @@ Code versions in the column *Code*:
 | after #13 | training code simplified, mixed precision removed ([#13](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/13)) |
 | mask2 | robust brick mask, `PREPROCESS_VERSION = "mask2"` ([#14](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/14)) |
 | mask2-pad | the crop square is padded at the image edge instead of shifted ([#18](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/18)). First runs: 2026-11-11. All runs of 2026-11-21 use it. |
-| mask2-pad-grey | current code: numpy images (sheet crops, and with `mask: yolo` the training images) get exactly PIL's grey values instead of values up to 1 lower ([#36](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/36)). Caches are rebuilt; no run with it yet. |
+| mask2-pad-grey | numpy images (sheet crops, and with `mask: yolo` the training images) get exactly PIL's grey values instead of values up to 1 lower ([#36](https://github.com/BluePineappleCake/lego-recognition-fhdo/pull/36)). Caches are rebuilt; no run with it yet. |
+| one way | current code, same `PREPROCESS_VERSION`: only the way of `shape_internet_own` is left (Kaggle renders, size feature, `contrast: none`, `brick_mask` training images and their settings removed; tag `v1-legacy`). The scores of `ok1tq8ks` are unchanged, bit for bit (9 sheet crops, 4 internet photos). A new run with the same seed is not bit-identical to before: the removed size-noise step drew random numbers. Cache names changed, caches are rebuilt. |
 
 ## 2026-11-21: Whole pipeline on our test photos, internet + own model, size prior
 

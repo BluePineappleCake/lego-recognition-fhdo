@@ -1,14 +1,9 @@
 """Train the shape classifier and log everything to W&B.
 
-    python scripts/train_shape.py --config configs/shape_baseline.yaml --sanity
-    python scripts/train_shape.py --config configs/shape_baseline.yaml
-    python scripts/train_shape.py --config configs/shape_size_feature.yaml --seed 1
-    python scripts/train_shape.py --config configs/shape_baseline.yaml --data C:\\lego\\data
-    python scripts/train_shape.py --config configs/shape_contrast_internet.yaml
+    python scripts/train_shape.py --config configs/shape_internet_own.yaml --sanity
     python scripts/train_shape.py --config configs/shape_internet_own.yaml
+    python scripts/train_shape.py --config configs/shape_internet_own.yaml --seed 1
 
---data: folder that directly contains the 40,000 Kaggle PNGs (default: see
-    legorec.paths).
 --internet-data: folder with photos/ and renders/ of the internet dataset
     (default: data/raw/internet). If photos/ is missing and not in train_on,
     it is skipped.
@@ -20,8 +15,7 @@ What happens, in order:
        source in train_on, and the internet photos for evaluation
     2. start a W&B run and log a few training images
     3. train for N epochs; after every epoch check the val split of every
-       source (Kaggle renders as val/*, internet photos as internet_val/*,
-       others as <source>_val/*) and keep the checkpoint with the best
+       source (internet photos as internet_val/*, others as <source>_val/*) and keep the checkpoint with the best
        macro-F1 on the val split of select_on
     4. load that best checkpoint and evaluate it once on the test splits of
        the render sources in train_on, and on internet/val. The test splits
@@ -59,10 +53,7 @@ EVAL_BATCH_SIZE = 512  # no gradients during evaluation, so bigger batches fit
 
 
 def prefix(source: str, split: str) -> str:
-    """W&B name of a source's split; the old names stay for comparison."""
-    old = {("kaggle_renders", "val"): "val", ("kaggle_renders", "test"): "render_test"}
-    if (source, split) in old:
-        return old[source, split]
+    """W&B name of a source's split, e.g. internet_val, own_renders_test."""
     if source == "internet_photos":
         return f"internet_{split}"
     return f"{source}_{split}"
@@ -71,7 +62,6 @@ def prefix(source: str, split: str) -> str:
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument("--data", default=None)
     parser.add_argument("--internet-data", default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
@@ -80,10 +70,6 @@ def parse_args():
 
 
 def start_wandb_run(config: TrainConfig, data: TrainData, sanity: bool):
-    tags = list(config.tags)
-    if config.size_feature:
-        tags.append("size-feature")
-
     logged_config = asdict(config) | {
         "split_hash": data.split_hash,
         "split_hashes": data.split_hashes,
@@ -95,14 +81,14 @@ def start_wandb_run(config: TrainConfig, data: TrainData, sanity: bool):
     return wandb.init(
         project=config.project,
         config=logged_config,
-        tags=tags,
+        tags=list(config.tags),
         job_type="sanity" if sanity else "train",
     )
 
 
 def log_sample_images(train_arrays, data: TrainData, device, config: TrainConfig):
     """Log 16 augmented training images: exactly what the network sees."""
-    x, _, labels = next(iter(Batches(*train_arrays, device, 16, shuffle=True)))
+    x, labels = next(iter(Batches(*train_arrays, device, 16, shuffle=True)))
     augmented = denormalize(augment_batch(x, config.hflip))
     as_uint8 = (augmented.cpu().numpy() * 255).astype(np.uint8)
 
@@ -162,12 +148,11 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # 1. data
-    roots = {"kaggle_renders": args.data}
-    roots |= dict.fromkeys(["internet_photos", "internet_renders"], args.internet_data)
+    roots = dict.fromkeys(["internet_photos", "internet_renders"], args.internet_data)
     data = load_training_data(config, roots)
     train_arrays = combine_train(data, config.train_on, config.real_repeat)
     print(
-        f"[data] train on {', '.join(config.train_on)}: {len(train_arrays[2])} "
+        f"[data] train on {', '.join(config.train_on)}: {len(train_arrays[1])} "
         f"images (photos {config.real_repeat}x), {len(data.parts)} classes"
     )
 
@@ -176,18 +161,18 @@ def main():
     vals = {
         source: Batches(*splits["val"], device, EVAL_BATCH_SIZE)
         for source, splits in data.sources.items()
-        if len(splits["val"][2])
+        if len(splits["val"][1])
     }
     if config.select_on not in vals:
         raise ValueError(f"select_on {config.select_on} has no val images")
 
     # 2. logging
     run = start_wandb_run(config, data, args.sanity)
-    print(f"[run] device {device}, size feature {config.size_feature}")
+    print(f"[run] device {device}")
     log_sample_images(train_arrays, data, device, config)
 
     # 3. model and training
-    model = SmallCNN(len(data.parts), config.width, config.dropout, config.size_feature)
+    model = SmallCNN(len(data.parts), config.width, config.dropout)
     model.to(device)
     run.summary["params"] = sum(p.numel() for p in model.parameters())
 
@@ -204,9 +189,7 @@ def main():
     loss_fn = nn.CrossEntropyLoss(label_smoothing=config.label_smoothing)
 
     if args.sanity:
-        loss = overfit_one_batch(
-            model, train, optimizer, scheduler, loss_fn, config, data.size_norm
-        )
+        loss = overfit_one_batch(model, train, optimizer, scheduler, loss_fn, config)
         print(f"[sanity] loss on that batch after training {loss:.4f} (should be ~0)")
         run.finish()
         return
@@ -218,7 +201,7 @@ def main():
     for epoch in range(config.epochs):
         start = time.time()
         train_loss, train_acc = train_epoch(
-            model, train, optimizer, scheduler, loss_fn, config, data.size_norm
+            model, train, optimizer, scheduler, loss_fn, config
         )
         logged = {"epoch": epoch, "train/loss": train_loss, "train/top1": train_acc}
         val_metrics = {}
@@ -247,7 +230,6 @@ def main():
                 data.names,
                 asdict(config),
                 data.split_hash,
-                data.size_norm,
             )
 
     # 4. final test with the best checkpoint
@@ -255,7 +237,7 @@ def main():
     test_metrics = {}
     for source in config.train_on:
         test = data.sources[source]["test"]
-        if source in PHOTO_SOURCES or not len(test[2]):
+        if source in PHOTO_SOURCES or not len(test[1]):
             continue  # photo test splits belong to scripts/eval_*.py
         name = prefix(source, "test")
         batches = Batches(*test, device, EVAL_BATCH_SIZE)

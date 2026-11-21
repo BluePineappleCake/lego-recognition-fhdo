@@ -1,17 +1,19 @@
-# No Kaggle renders: trained on the internet photos and renders, our own
-# renders (data/raw/own_renders; add parts with scripts/render_ldraw.py) and,
-# for parts without internet data, the bricks on our sheet photos (train split
-# of data/splits/sheets.csv; eval_own.py uses the test split).
-# The classes are all parts with training images. The best epoch is picked on
-# the internet photos (val), not on renders: that is what we want to be good at.
-# mask: yolo = the training images get their mask from the YOLO brick finder,
-# as the sheet photos do (brick_mask only where YOLO finds nothing). Better on
-# our photos than brick_mask in all 3 seeds (docs/experiments.md, 2026-11-21).
+# The team's model. Settings not listed here: TrainConfig in
+# src/legorec/shape/train.py.
+#
+# train_on: the internet photos and renders, our own renders
+#   (data/raw/own_renders; add parts with scripts/render_ldraw.py) and, for
+#   parts without internet data, the bricks on our sheet photos (train split
+#   of data/splits/sheets.csv; eval_own.py uses the test split).
+#   The classes are all parts with training images.
+# own_photo_parts: the parts own_photos may add (4073: not in the internet set).
+# select_on: the best epoch is picked on the internet photos (val), not on
+#   renders: real photos are what we want to be good at.
+# real_repeat: every real photo is used 8 times per epoch, otherwise a few
+#   thousand photos would hardly count next to ~40,000 renders.
+# tags: for W&B; the same as for the runs before, so they stay comparable.
 size: 96
 width: 32
-size_feature: false
-contrast: stretch
-mask: yolo
 train_on: [internet_photos, internet_renders, own_renders, own_photos]
 own_photo_parts: ["4073"]
 select_on: internet_photos

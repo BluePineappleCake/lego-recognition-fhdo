@@ -61,9 +61,13 @@ From the [experiment log](docs/experiments.md) (last entry: 2026-11-21):
   side). Weighing the CNN's answer with that size lifts our photos from about
   56 % to 82–84 %, without any training.
 - **Training data:** internet photos and renders plus our own renders
-  (LDraw, `scripts/render_ldraw.py`); no Kaggle renders. The training images
-  are cut out by the same YOLO model as the sheet photos (`mask: yolo`), which
-  was better than the old mask in all 3 seeds.
+  (LDraw, `scripts/render_ldraw.py`). The training images are cut out by the
+  same YOLO model as the sheet photos, which was better than the old mask in
+  all 3 seeds.
+- **Older experiments** (Kaggle renders, size feature, models without
+  contrast stretch or YOLO masks): their code is in the Git tag
+  [`v1-legacy`](https://github.com/BluePineappleCake/lego-recognition-fhdo/tree/v1-legacy);
+  `main` only keeps the way the team's model is trained.
 - **Main error left:** a brick vs a plate with the same footprint (3003 vs
   3022, 3004 vs 3023). From above they look and measure almost the same.
 - **Careful:** test and training photos come from the same photo sessions. A
@@ -78,7 +82,7 @@ Open questions and next steps are at the top of the
 | What | Where | Access |
 |---|---|---|
 | Experiment tracking | [W&B project `lego-fhdo/lego-recognition`](https://forge.coreweave.com/wandb/lego-fhdo/lego-recognition) | team members – ask for an invite to the W&B team `lego-fhdo` |
-| Training data (renders) | [Kaggle: Images of LEGO Bricks](https://www.kaggle.com/datasets/joosthazelzet/lego-brick-images) | public |
+| Training data (photos, renders) | [TU Gdańsk: LEGO bricks for training classification network](https://mostwiedzy.pl/en/open-research-data/lego-bricks-for-training-classification-network,202309140842198941751-0) | public |
 | Our photos | private Kaggle dataset `gonsterenjoyer/lego-sheet-photos`, see [`data/README.md`](data/README.md) | team members (added as collaborators) |
 | Part and set lists | [Rebrickable downloads](https://rebrickable.com/downloads/) | public |
 | Experiment log | [`docs/experiments.md`](docs/experiments.md) | – |
@@ -126,7 +130,7 @@ install. The words in brackets are optional extras:
 | Extra | Adds | You need it for |
 |---|---|---|
 | `dev` | pytest, ruff, pre-commit, nbstripout, scikit-learn | tests and code style (everyone) |
-| `train` | PyTorch, torchvision, W&B | training and using the model (already installed on Kaggle) |
+| `train` | PyTorch, torchvision, W&B, Ultralytics | training and using the model (YOLO cuts out the training images) |
 | `detect` | Ultralytics | finding the bricks with YOLO-seg (`--method yolo`, the default of `find_bricks.py`) |
 | `docs` | matplotlib | the notebooks in `notebooks/` |
 
@@ -146,17 +150,12 @@ shows the folder layout and how to download everything.
   into `data/raw/internet/`, and our own renders into `data/raw/own_renders/`.
   Which folders and how to name them: [`data/README.md`](data/README.md),
   sections 2b and 2d.
-- **Kaggle renders (older models only):**
-  [Images of LEGO Bricks](https://www.kaggle.com/datasets/joosthazelzet/lego-brick-images)
-  by J. Hazelzet, 40,000 images of 50 part types, into `data/raw/renders/`
-  (the code expects `data/raw/renders/dataset/`). Only the older configs need
-  them; ignore the folder "LEGO brick images v1" in the download.
 - **Real photos (fine-tuning and test):** our own photos, in a private Kaggle
   dataset.
 - **Splits:** the files `data/splits/*.csv` say which image belongs to train,
   val or test. They are in Git, so everyone uses exactly the same split.
-  - Never regenerate `renders.csv`: render results can only be compared on the
-    same split.
+  - Never regenerate a split file: results can only be compared on the same
+    split.
   - The test split of our real photos is frozen: never train or tune anything
     on it.
 
@@ -169,22 +168,21 @@ images:
 
 | Source (`train_on`) | Folder | Parts |
 |---|---|---|
-| `kaggle_renders` | `data/raw/renders/dataset/` | 50 |
 | `internet_photos` | `data/raw/internet/photos/` | 18 |
 | `internet_renders` | `data/raw/internet/renders/` | 17 |
 | `own_renders` | `data/raw/own_renders/` (`scripts/render_ldraw.py`) | 3 so far |
 | `own_photos` | bricks on our sheet photos, only the parts in `own_photo_parts` | e.g. 4073 |
 
 The team's model uses **`configs/shape_internet_own.yaml`**: internet photos
-and renders, our renders, and our photos of 4073 (19 parts, no Kaggle
-renders). Its training images are cut out by the YOLO brick finder
-(`mask: yolo`), the same way as the sheet photos later.
+and renders, our renders, and our photos of 4073 (19 parts). Its training
+images are cut out by the YOLO brick finder, the same way as the sheet photos
+later (where YOLO finds nothing, by `brick_mask`).
 
 **What one training run does** (`scripts/train_shape.py`):
 
 1. It reads the config and loads the images of every source in `train_on`,
    plus the internet photos for evaluation. The first run preprocesses all
-   images once (a few minutes, with `mask: yolo` YOLO runs over each of them)
+   images once (a few minutes, YOLO runs over each of them)
    and caches them in `data/processed/`.
 2. It starts a run in W&B and logs a few training images, so you can see what
    the network sees.
@@ -226,7 +224,6 @@ python scripts/train_shape.py --config configs/shape_internet_own.yaml --sanity
 ```powershell
 python scripts/train_shape.py --config configs/shape_internet_own.yaml           # the team's model
 python scripts/train_shape.py --config configs/shape_internet_own.yaml --seed 1  # the same, seed 1
-python scripts/train_shape.py --config configs/shape_contrast.yaml               # Kaggle renders only
 ```
 
 One run of `shape_internet_own` takes about 9 minutes on an RTX 4080 (30
@@ -237,7 +234,6 @@ afterwards.
 | Option | Meaning |
 |---|---|
 | `--config` | YAML file in `configs/` (required) |
-| `--data` | folder that directly contains the 40,000 Kaggle PNGs (default: `data/raw/renders/dataset/`) |
 | `--internet-data` | folder with `photos/` and `renders/` of the internet dataset (default: `data/raw/internet/`) |
 | `--seed` | random seed, e.g. `--seed 1` (default: 0) |
 | `--epochs` | number of epochs, overrides the config |
@@ -252,35 +248,14 @@ Before you compare variants, read the
 [rules for experiments](#rules-for-experiments). Write what you found into
 [`docs/experiments.md`](docs/experiments.md).
 
-### On Kaggle (no local GPU needed)
+### Without a local GPU
 
-1. *Create → New Notebook*. In the right panel: *+ Add Input* →
-   "Images of LEGO Bricks" (joosthazelzet). *Settings* → Accelerator **GPU**,
-   Internet **on** (needs a phone-verified Kaggle account).
-2. *Add-ons → Secrets*: add `WANDB_API_KEY` (your key from
-   [wandb.ai/authorize](https://wandb.ai/authorize)) and tick it for this
-   notebook.
-3. Run:
-
-```python
-import os
-from kaggle_secrets import UserSecretsClient
-
-os.environ["WANDB_API_KEY"] = UserSecretsClient().get_secret("WANDB_API_KEY")
-os.environ["WANDB_ENTITY"] = "lego-fhdo"
-os.environ["LEGOREC_PROCESSED"] = "/kaggle/working/processed"  # /kaggle/input is read-only
-
-!git clone https://github.com/BluePineappleCake/lego-recognition-fhdo.git
-%cd lego-recognition-fhdo
-!pip install -q -e ".[train]"   # torch is preinstalled and stays as is
-!python scripts/train_shape.py --config configs/shape_baseline.yaml \
-    --data /kaggle/input/datasets/joosthazelzet/lego-brick-images/dataset
-```
-
-- `--data` must point to `.../dataset`. The input also contains the older
-  version "LEGO brick images v1".
-- For full training runs use *Save Version → Save & Run All*. Interactive
-  sessions stop when you are idle.
+Training needs the internet set and our renders; neither is on Kaggle or
+Colab. To train there, upload `data/raw/internet/` and `data/raw/own_renders/`
+as a private dataset, set `LEGOREC_DATA` to the folder that contains `raw/`,
+and `LEGOREC_PROCESSED` to a writable folder (e.g. `/kaggle/working/processed`).
+The older Kaggle-render runs and their notebook setup are in the Git tag
+`v1-legacy`.
 
 ## Find and name the bricks on a sheet photo
 
@@ -335,10 +310,10 @@ part, confidence = predict(crop)  # e.g. ("3001", 0.93)
 - A photo without bricks: `ShapeClassifier.predict([])` returns `[]`.
 - The model is loaded from `models/shape.pt`, or from the file named in the
   environment variable `LEGOREC_SHAPE_MODEL`.
-- The checkpoint stores its preprocessing settings (e.g. `contrast`), so
-  `predict` uses the same preprocessing as in training.
-- Size-feature models need `load_model(path, real_scale=...)` before the first
-  `predict`, see `src/legorec/shape/predict.py`.
+- Every model is trained and used with the same preprocessing
+  (`src/legorec/shape/preprocess.py`). Checkpoints of older experiments
+  (Kaggle, size feature, ...) are refused with a message: they need the Git
+  tag `v1-legacy`.
 
 **Get the team's default model.** It is the W&B artifact `shape-cnn:default`
 (which run it is and why: [experiment log](docs/experiments.md)). Download it
@@ -383,14 +358,14 @@ Every file starts with a docstring that explains the idea behind it.
 
 | File | What it does |
 |---|---|
-| `src/legorec/data/renders.py` | finds the Kaggle renders, splits them by pose, caches the preprocessed images |
+| `src/legorec/data/splits.py` | train / val / test files in `data/splits/`, the same for the whole team |
+| `src/legorec/data/renders.py` | the renders (internet set, our LDraw renders): index, split by pose |
 | `src/legorec/data/internet.py` | the internet photos: index, split by capture |
 | `src/legorec/data/sheets.py`, `own.py` | our sheet photos and the hand-checked crops of them |
-| `src/legorec/data/cut_renders.py` | renders already cut to the brick (internet renders, our LDraw renders), split by pose |
-| `src/legorec/shape/preprocess.py` | one brick image → 96 × 96 grey crop + measured size (the same code for renders and photos) |
+| `src/legorec/shape/preprocess.py` | one brick image → 96 × 96 grey crop (the same code for renders and photos) |
 | `src/legorec/shape/augment.py` | random rotation, zoom, shift and lighting for every training batch |
-| `src/legorec/shape/model.py` | the CNN with the optional size input, checkpoints, `ShapeClassifier` for new images |
-| `src/legorec/shape/train.py` | `TrainConfig` (all settings), the training sources (`train_on`), one training epoch, evaluation |
+| `src/legorec/shape/model.py` | the CNN, checkpoints, `ShapeClassifier` for new images |
+| `src/legorec/shape/train.py` | `TrainConfig` (all settings), the training sources (`train_on`), the image cache, one training epoch, evaluation |
 | `src/legorec/shape/size_prior.py` | the size prior: how well the measured size in mm fits each part |
 | `scripts/train_shape.py` | puts it together: data → W&B run → training → test |
 | `src/legorec/eval/metrics.py` | top-1, top-3, macro-F1, length errors, McNemar test |
@@ -441,16 +416,16 @@ Every file starts with a docstring that explains the idea behind it.
 
 | Term | Meaning |
 |---|---|
-| Render | A computer-generated image of a 3D LEGO model. Our training data (Kaggle). |
+| Render | A computer-generated image of a 3D LEGO model. Training data: the internet set and our own LDraw renders. |
 | Real photo | A photo of real bricks that we take ourselves. The tool has to work on these in the end. |
 | Render-to-real gap | How much accuracy a model loses when it is trained on renders and used on real photos. Measuring and closing it is our core experiment. |
-| Part number | LEGO's number for a part shape, e.g. 3001 = brick 2×4. These are our classes (the renders have 50). |
-| Pose | One orientation of a brick in the renders. Every pose was rendered by two cameras (L and R), so there are two almost identical images of it. |
-| Split by pose | Both images of a pose always go into the same split. Otherwise a near-copy of a training image would end up in the test set, and the test would be too easy. |
+| Part number | LEGO's number for a part shape, e.g. 3001 = brick 2×4. These are our classes. |
+| Pose | One orientation of a brick in the renders. The same pose comes in several colours, so there are several almost identical images of it. |
+| Group | Images that must stay in one split: the colours of one render pose, the cameras of one internet capture, the bricks of one sheet photo. Otherwise a near-copy of a training image would end up in the test set, and the test would be too easy. |
 | Train / val / test | *Train*: the model learns from it. *Val*: we use it to choose (best epoch, settings). *Test*: only for the final number. |
 | Frozen test set | A test set that never changes and is never used for decisions. |
 | Crop | The cut-out of one brick, scaled to 96 × 96 grey pixels. This is what the CNN sees. |
-| Baseline | The standard config (`configs/shape_baseline.yaml`). Every variant is compared against it. |
+| Baseline | The team's config (`configs/shape_internet_own.yaml`). Every variant is compared against it. |
 | Top-1 / top-3 accuracy | Share of images where the right part is the model's first guess / among its three best guesses. |
 | Macro-F1 | The F1 score of every part, averaged, so every part counts the same. Used to pick the best epoch. |
 | pp | Percentage points: from 94.45 % to 92.35 % is -2.1 pp. |
@@ -464,9 +439,8 @@ Every file starts with a docstring that explains the idea behind it.
 | OneCycle | A learning-rate schedule: the learning rate first goes up, then down to almost 0 at the end of training. |
 | Label smoothing | The training target for the right part is about 0.9 instead of 1 (setting `label_smoothing: 0.1`). |
 | Length errors | Confusions between parts that differ only in length, like brick 1×3 and 1×4. The pairs follow from `PART_GEOMETRY` in `src/legorec/eval/metrics.py` (same family and width, different length). |
-| Size feature | Resizing to 96 × 96 removes the real size of a brick. With `size_feature: true`, the measured size (in pixels) is an extra input to the network. |
-| `real_scale` | Converts brick sizes from photo pixels to render pixels. Only needed for size-feature models on photos. |
-| Contrast stretch | The option `contrast: stretch`: the grey values of each brick are spread over the full range 0–255. Idea: in greyscale a red brick is almost black. |
+| Size prior | Resizing to 96 × 96 removes the real size of a brick. On a sheet photo it is measured in mm and added to the scores: how well does that size fit each part? (`src/legorec/shape/size_prior.py`) |
+| Contrast stretch | The grey values of each brick are spread over the full range 0–255. Idea: in greyscale a red brick is almost black. |
 | Calibrated | A model is calibrated if its confidence matches how often it is right: answers with 80 % confidence are right in about 80 % of cases. *Underconfident*: the confidence is lower than the accuracy. |
 | Temperature scaling | A simple way to calibrate a model: divide its outputs by one number that is fitted on the val set. |
 | McNemar test | A statistical test that compares two models on the *same* images. It only looks at the images where exactly one of the two models is right. |

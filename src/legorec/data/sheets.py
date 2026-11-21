@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from legorec.data.renders import load_or_create_split
+from legorec.data.splits import load_or_create_split
 from legorec.paths import SPLITS_DIR
 
 SPLIT_FILE = SPLITS_DIR / "sheets.csv"

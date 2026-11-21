@@ -7,8 +7,7 @@ import numpy as np
 
 # Footprint of the parts that come in several lengths: family, width, length
 # (in studs, as in the LEGO name; for slopes "2 x 3" = 2 deep, 3 wide).
-# Includes parts that are not among the 50 Kaggle classes yet but in our own
-# data (3009, 3710, 3666).
+# Also lists parts that no model knows yet; they simply never occur.
 PART_GEOMETRY = {
     "3005": ("brick", 1, 1),
     "3004": ("brick", 1, 2),
@@ -46,7 +45,7 @@ PART_GEOMETRY = {
 
 # Pairs of parts that differ only in length: same family and width, different
 # length (3004 brick 1x2 / 3010 brick 1x4). Defined from the geometry, not from
-# the errors a model makes, so the size feature is judged on a fixed set.
+# the errors a model makes, so every model is judged on a fixed set.
 # Look-alikes of other kinds (3005 brick 1x1 / 3040 slope 2x1) are not length
 # errors. Pairs are unordered.
 LENGTH_PAIRS = {
@@ -67,9 +66,9 @@ def macro_f1(y_true: np.ndarray, y_pred: np.ndarray) -> float:
         FN: images of this class predicted as something else
 
     Only classes that occur in y_true or y_pred are averaged (same as
-    sklearn's f1_score with average="macro"). Our photos will not show all
-    50 parts: a part that is neither in the photos nor predicted must not
-    count as F1 = 0.
+    sklearn's f1_score with average="macro"). Our photos will not show every
+    part of the model: a part that is neither in the photos nor predicted
+    must not count as F1 = 0.
     """
     y_true, y_pred = np.asarray(y_true), np.asarray(y_pred)
     f1_per_class = []

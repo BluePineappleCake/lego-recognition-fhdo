@@ -21,13 +21,7 @@ Which model is used?
     or set the environment variable LEGOREC_SHAPE_MODEL to another file.
     The model is loaded once, on the first call to predict().
 
-Models trained with the size feature (configs/shape_size_feature.yaml) also
-need real_scale. Call load_model() yourself in that case:
-
-    from legorec.shape.predict import load_model, predict
-
-    load_model("models/shape_xyz.pt", real_scale=1.2)
-    part, confidence = predict(crop)
+Another model: load_model("models/shape_xyz.pt") once, then predict() as usual.
 
 For many crops at once (faster on the GPU) use the classifier directly:
     load_model().predict(crops) -> [(part, confidence), ...]
@@ -48,7 +42,6 @@ _classifier = None
 
 def load_model(
     checkpoint: str | Path | None = None,
-    real_scale: float | None = None,
     device: str | None = None,
     size_prior="auto",
 ) -> ShapeClassifier:
@@ -56,7 +49,6 @@ def load_model(
 
     checkpoint: path to a .pt file from scripts/train_shape.py,
         default: models/shape.pt (or $LEGOREC_SHAPE_MODEL)
-    real_scale: only for size-feature models, see ShapeClassifier
     device: "cuda" or "cpu", default: the GPU if there is one
     size_prior: legorec.shape.size_prior.SizePrior, only for crops of a sheet
         photo. "auto" (default): the table in data/reference/ if it exists.
@@ -76,9 +68,7 @@ def load_model(
     if size_prior == "auto":
         size_prior = SizePrior.load() if TABLE.exists() else None
 
-    _classifier = ShapeClassifier(
-        checkpoint, device=device, real_scale=real_scale, size_prior=size_prior
-    )
+    _classifier = ShapeClassifier(checkpoint, device=device, size_prior=size_prior)
     return _classifier
 
 
