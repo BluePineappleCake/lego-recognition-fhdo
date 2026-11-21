@@ -130,7 +130,8 @@ def sheet_bricks(split, known):
     return bricks, crops, skipped
 
 
-def evaluate(checkpoint, bricks, crops, device, size_prior=None):
+def evaluate(checkpoint, bricks, crops, device, size_prior=None) -> dict:
+    """One model on the bricks: metrics and what it answered for every brick."""
     classifier = ShapeClassifier(checkpoint, device=device, size_prior=size_prior)
     parts = classifier.parts
     y = np.array([parts.index(brick.part) for brick in bricks])
@@ -139,12 +140,131 @@ def evaluate(checkpoint, bricks, crops, device, size_prior=None):
     m["top1_k"] = top1_among(scores, y, sorted(set(y)))
     photo_right = group_top1(scores, y, [brick.group for brick in bricks])
     m["photo_top1"] = float(np.mean(list(photo_right.values())))
-    pred = scores.argmax(axis=1)
-    probabilities = softmax(scores)
-    return classifier, m, pred, probabilities, y, photo_right
+    variant, seed = variant_and_seed(checkpoint)
+    return {
+        "variant": variant,
+        "seed": seed,
+        "m": m,
+        "pred": scores.argmax(axis=1),
+        "prob": softmax(scores).max(axis=1),
+        "y": y,
+        "parts": parts,
+        "names": classifier.names,
+        "photo_right": photo_right,
+    }
 
 
-def main():
+def write_predictions(path: Path, bricks, result) -> None:
+    """One line per brick: which part it is and what the model said."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file, lineterminator="\n")
+        writer.writerow(["path", "photo", "session", "part", "pred", "prob"])
+        for brick, pred, prob in zip(bricks, result["pred"], result["prob"]):
+            part = result["parts"][pred]
+            writer.writerow(
+                [
+                    brick.path,
+                    brick.group,
+                    brick.session,
+                    brick.part,
+                    part,
+                    f"{prob:.3f}",
+                ]
+            )
+
+
+def runs_per_variant(results) -> dict[str, list[str]]:
+    by_variant = defaultdict(list)
+    for run, r in results.items():
+        by_variant[r["variant"]].append(run)
+    return dict(sorted(by_variant.items()))
+
+
+def print_models(results) -> None:
+    keys = ["top1", "top3", "top1_k", "photo_top1", "macro_f1", "conf"]
+    print(
+        f"{'model':<10}{'seed':>5}  {'variant':<28}" + "".join(f"{k:>11}" for k in keys)
+    )
+    for run, r in sorted(
+        results.items(), key=lambda kv: (kv[1]["variant"], str(kv[1]["seed"]))
+    ):
+        print(
+            f"{run:<10}{r['seed']!s:>5}  {r['variant']:<28}"
+            + "".join(f"{r['m'][k]:>11.3f}" for k in keys)
+        )
+
+
+def print_per_variant(results) -> None:
+    print("\nPer variant (mean [min, max] over seeds):")
+    for variant, runs in runs_per_variant(results).items():
+        cells = []
+        for k in ("top1", "photo_top1", "macro_f1"):
+            v = np.array([results[x]["m"][k] for x in runs])
+            cells.append(f"{k} {v.mean():.3f} [{v.min():.3f}, {v.max():.3f}]")
+        print(f"  {variant:<28} n={len(runs)}  " + "   ".join(cells))
+
+
+def top1_of_variants(results, selected) -> list[float]:
+    """Top-1 on the selected bricks (bool array), mean over the seeds of each
+    variant."""
+    return [
+        np.mean(
+            [
+                np.mean(results[x]["pred"][selected] == results[x]["y"][selected])
+                for x in runs
+            ]
+        )
+        for runs in runs_per_variant(results).values()
+    ]
+
+
+def print_per_part(results, bricks) -> None:
+    print("\nTop-1 per part (crops), mean over seeds of each variant:")
+    names = next(iter(results.values()))["names"]
+    variants = runs_per_variant(results)
+    print(f"  {'part':<26}{'n':>5}" + "".join(f"{v[:24]:>26}" for v in variants))
+    for part in sorted({b.part for b in bricks}):
+        selected = np.array([b.part == part for b in bricks])
+        row = top1_of_variants(results, selected)
+        label = names.get(part, part)[:25]
+        print(f"  {label:<26}{selected.sum():>5}" + "".join(f"{a:>26.2f}" for a in row))
+
+
+def print_per_session(results, bricks) -> None:
+    print("\nTop-1 per session (crops), mean over seeds:")
+    for session in sorted({b.session for b in bricks}):
+        selected = np.array([b.session == session for b in bricks])
+        row = top1_of_variants(results, selected)
+        print(
+            f"  {session:<26}{selected.sum():>5}" + "".join(f"{a:>26.2f}" for a in row)
+        )
+
+
+def print_mcnemar(results) -> None:
+    """Paired test per photo between two variants, for models of the same seed."""
+    variants = runs_per_variant(results)
+    if len(variants) < 2:
+        return
+    print("\nMcNemar per photo, seed-matched (only A right / only B right, p):")
+    names = list(variants)
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            for ra in variants[a]:
+                for rb in variants[b]:
+                    if results[ra]["seed"] != results[rb]["seed"]:
+                        continue
+                    groups = sorted(results[ra]["photo_right"])
+                    pa = np.array([results[ra]["photo_right"][g] for g in groups])
+                    pb = np.array([results[rb]["photo_right"][g] for g in groups])
+                    oa, ob, p = mcnemar_p(pa, pb)
+                    print(
+                        f"  seed {results[ra]['seed']}: {a} ({ra}) vs {b} ({rb}): "
+                        f"{oa}/{ob} p={p:.3f}"
+                    )
+
+
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--split",
@@ -159,14 +279,17 @@ def main():
         "(data/reference/part_sizes.csv, from the train photos)",
     )
     parser.add_argument("--models", nargs="*", default=None)
-    args = parser.parse_args()
-    size_prior = SizePrior.load() if args.size_prior else None
+    return parser.parse_args()
 
+
+def main():
+    args = parse_args()
+    size_prior = SizePrior.load() if args.size_prior else None
     checkpoints = usable_checkpoints(
         args.models or sorted(MODELS_DIR.glob("shape_*.pt"))  # shape.pt: a copy
     )
-    known = parts_known_by_all(checkpoints)
-    bricks, crops, skipped = sheet_bricks(args.split, known)
+
+    bricks, crops, skipped = sheet_bricks(args.split, parts_known_by_all(checkpoints))
     if not bricks:
         raise SystemExit("no bricks of a part that every model knows")
     print(
@@ -177,116 +300,21 @@ def main():
     print(
         f"[data] not known by every model, skipped: {', '.join(sorted(skipped)) or '-'}\n"
     )
-    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    results = {}  # run -> dict
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    prefix = "eval_own_size" if size_prior else "eval_own"
+    results = {}  # run id -> result of evaluate()
     for checkpoint in checkpoints:
         run = checkpoint.stem.removeprefix("shape_")
-        classifier, m, pred, prob, y, photo_right = evaluate(
-            checkpoint, bricks, crops, device, size_prior
-        )
-        variant, seed = variant_and_seed(checkpoint)
-        results[run] = {
-            "variant": variant,
-            "seed": seed,
-            "m": m,
-            "pred": pred,
-            "y": y,
-            "parts": classifier.parts,
-            "names": classifier.names,
-            "photo_right": photo_right,
-        }
-        prefix = "eval_own_size" if size_prior else "eval_own"
+        results[run] = evaluate(checkpoint, bricks, crops, device, size_prior)
         out = processed_dir() / f"{prefix}_{args.split}_{run}.csv"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "w", newline="", encoding="utf-8") as file:
-            writer = csv.writer(file, lineterminator="\n")
-            writer.writerow(["path", "photo", "session", "part", "pred", "prob"])
-            for c, p, pr in zip(bricks, pred, prob.max(axis=1)):
-                writer.writerow(
-                    [
-                        c.path,
-                        c.group,
-                        c.session,
-                        c.part,
-                        classifier.parts[p],
-                        f"{pr:.3f}",
-                    ]
-                )
+        write_predictions(out, bricks, results[run])
 
-    keys = ["top1", "top3", "top1_k", "photo_top1", "macro_f1", "conf"]
-    print(
-        f"{'model':<10}{'seed':>5}  {'variant':<28}" + "".join(f"{k:>11}" for k in keys)
-    )
-    for run, r in sorted(
-        results.items(), key=lambda kv: (kv[1]["variant"], str(kv[1]["seed"]))
-    ):
-        print(
-            f"{run:<10}{r['seed']!s:>5}  {r['variant']:<28}"
-            + "".join(f"{r['m'][k]:>11.3f}" for k in keys)
-        )
-
-    by_variant = defaultdict(list)
-    for run, r in results.items():
-        by_variant[r["variant"]].append(run)
-    print("\nPer variant (mean [min, max] over seeds):")
-    for variant, runs in sorted(by_variant.items()):
-        cells = []
-        for k in ("top1", "photo_top1", "macro_f1"):
-            v = np.array([results[x]["m"][k] for x in runs])
-            cells.append(f"{k} {v.mean():.3f} [{v.min():.3f}, {v.max():.3f}]")
-        print(f"  {variant:<28} n={len(runs)}  " + "   ".join(cells))
-
-    print("\nTop-1 per part (crops), mean over seeds of each variant:")
-    parts_present = sorted({b.part for b in bricks})
-    names = next(iter(results.values()))["names"]
-    variants = sorted(by_variant)
-    print(f"  {'part':<26}{'n':>5}" + "".join(f"{v[:24]:>26}" for v in variants))
-    for part in parts_present:
-        idx = np.array([b.part == part for b in bricks])
-        row = []
-        for v in variants:
-            row.append(
-                np.mean(
-                    [
-                        np.mean(results[x]["pred"][idx] == results[x]["y"][idx])
-                        for x in by_variant[v]
-                    ]
-                )
-            )
-        label = names.get(part, part)[:25]
-        print(f"  {label:<26}{idx.sum():>5}" + "".join(f"{a:>26.2f}" for a in row))
-
-    print("\nTop-1 per session (crops), mean over seeds:")
-    for session in sorted({b.session for b in bricks}):
-        idx = np.array([b.session == session for b in bricks])
-        row = [
-            np.mean(
-                [
-                    np.mean(results[x]["pred"][idx] == results[x]["y"][idx])
-                    for x in by_variant[v]
-                ]
-            )
-            for v in variants
-        ]
-        print(f"  {session:<26}{idx.sum():>5}" + "".join(f"{a:>26.2f}" for a in row))
-
-    if len(variants) > 1:
-        print("\nMcNemar per photo, seed-matched (only A right / only B right, p):")
-        for i, a in enumerate(variants):
-            for b in variants[i + 1 :]:
-                for ra in by_variant[a]:
-                    for rb in by_variant[b]:
-                        if results[ra]["seed"] != results[rb]["seed"]:
-                            continue
-                        groups = sorted(results[ra]["photo_right"])
-                        pa = np.array([results[ra]["photo_right"][g] for g in groups])
-                        pb = np.array([results[rb]["photo_right"][g] for g in groups])
-                        oa, ob, p = mcnemar_p(pa, pb)
-                        print(
-                            f"  seed {results[ra]['seed']}: {a} ({ra}) vs {b} ({rb}): "
-                            f"{oa}/{ob} p={p:.3f}"
-                        )
+    print_models(results)
+    print_per_variant(results)
+    print_per_part(results, bricks)
+    print_per_session(results, bricks)
+    print_mcnemar(results)
 
 
 if __name__ == "__main__":
