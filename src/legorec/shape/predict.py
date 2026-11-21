@@ -43,6 +43,7 @@ def load_model(
     checkpoint: str | Path | None = None,
     real_scale: float | None = None,
     device: str | None = None,
+    size_prior=None,
 ) -> ShapeClassifier:
     """Load a checkpoint and use it for all following predict() calls.
 
@@ -50,6 +51,7 @@ def load_model(
         default: models/shape.pt (or $LEGOREC_SHAPE_MODEL)
     real_scale: only for size-feature models, see ShapeClassifier
     device: "cuda" or "cpu", default: the GPU if there is one
+    size_prior: legorec.shape.size_prior.SizePrior, only for sheet crops
     """
     global _classifier  # predict() uses the model loaded here
 
@@ -63,7 +65,9 @@ def load_model(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    _classifier = ShapeClassifier(checkpoint, device=device, real_scale=real_scale)
+    _classifier = ShapeClassifier(
+        checkpoint, device=device, real_scale=real_scale, size_prior=size_prior
+    )
     return _classifier
 
 
