@@ -87,7 +87,41 @@ def numbers(flags: list[int]) -> str:
     return " ".join(map(str, flags))
 
 
-def main():
+def review_flags(polygons, w: int, h: int) -> tuple[list[int], list[int], list[int]]:
+    """Polygon numbers (1 = first) that are big, ragged or touch the edge."""
+    areas = np.array([cv2.contourArea(p.astype(np.int32)) for p in polygons])
+    median = np.median(areas) if len(areas) else 0
+    big = [i + 1 for i, a in enumerate(areas) if a > BIG * median]
+    ragged = [i + 1 for i, p in enumerate(polygons) if solidity(p) < RAGGED]
+    edge = [i + 1 for i, p in enumerate(polygons) if touches_edge(p, w, h)]
+    return big, ragged, edge
+
+
+def write_review(out: Path, review: list[list]) -> None:
+    """review.csv: val / test first, then the photos with the most flags."""
+    review.sort(
+        key=lambda r: (
+            r[1] not in EVAL_SPLITS,
+            -sum(len(c.split()) for c in r[3:6]),
+            r[0],
+        )
+    )
+    with open(out / "review.csv", "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file, lineterminator="\n")
+        writer.writerow(["photo", "split", "n_bricks", "big", "ragged", "edge"])
+        writer.writerows(review)
+
+
+def empty_export(out: Path) -> None:
+    """A fresh folder: never mix a new export with files of an old one."""
+    if out.exists():
+        shutil.rmtree(out)
+    for kind in ("images", "labels"):
+        for split in ("train", "val", "test"):
+            (out / kind / split).mkdir(parents=True, exist_ok=True)
+
+
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--photos", default=str(own_photos_dir()))
     parser.add_argument("--out", default=str(processed_dir() / "yolo_bricks"))
@@ -102,19 +136,17 @@ def main():
         default=str(LABELS_DIR / "sheets"),
         help="folder with labels corrected by hand (<photo>.txt)",
     )
-    args = parser.parse_args()
+    return parser.parse_args()
 
+
+def main():
+    args = parse_args()
     photos = index_sheet_photos(args.photos)
     split_of, fingerprint = load_or_create_sheet_split(photos)
     split_of_group = {p.group: s for s, ps in split_of.items() for p in ps}
-    out = Path(args.out)
-    if out.exists():  # never mix a new export with files of an old one
-        shutil.rmtree(out)
-    for kind in ("images", "labels"):
-        for split in ("train", "val", "test"):
-            (out / kind / split).mkdir(parents=True, exist_ok=True)
+    out, fixed_dir = Path(args.out), Path(args.fixed)
+    empty_export(out)
 
-    fixed_dir = Path(args.fixed)
     review, skipped, counts = [], [], defaultdict(lambda: [0, 0])
     n_fixed, unverified = 0, defaultdict(int)  # eval split -> uncorrected photos
     for photo in photos:
@@ -147,11 +179,7 @@ def main():
         counts[split][0] += 1
         counts[split][1] += len(lines)
 
-        areas = np.array([cv2.contourArea(p.astype(np.int32)) for p in polygons])
-        median = np.median(areas) if len(areas) else 0
-        big = [i + 1 for i, a in enumerate(areas) if a > BIG * median]
-        ragged = [i + 1 for i, p in enumerate(polygons) if solidity(p) < RAGGED]
-        edge = [i + 1 for i, p in enumerate(polygons) if touches_edge(p, w, h)]
+        big, ragged, edge = review_flags(polygons, w, h)
         if not fixed.exists() and (big or ragged or edge or split in EVAL_SPLITS):
             review.append(
                 [photo.group, split, len(lines), numbers(big), numbers(ragged),
@@ -159,18 +187,7 @@ def main():
             )  # fmt: skip
 
     write_data_yaml(out)
-    # val / test first, then the photos with the most flags
-    review.sort(
-        key=lambda r: (
-            r[1] not in EVAL_SPLITS,
-            -sum(len(c.split()) for c in r[3:6]),
-            r[0],
-        )
-    )
-    with open(out / "review.csv", "w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file, lineterminator="\n")
-        writer.writerow(["photo", "split", "n_bricks", "big", "ragged", "edge"])
-        writer.writerows(review)
+    write_review(out, review)
 
     print(f"[split] {fingerprint}")
     for split, (n_photos, n_bricks) in counts.items():

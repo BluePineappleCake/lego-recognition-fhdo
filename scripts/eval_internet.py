@@ -24,6 +24,7 @@ Older models that need the Git tag v1-legacy are skipped.
 
 import argparse
 import csv
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -45,13 +46,93 @@ from legorec.shape.classifier import ShapeClassifier
 from legorec.shape.model import parts_known_by_all, usable_checkpoints
 
 
-def main():
+def evaluate(
+    checkpoint, photos, crops, device
+) -> tuple[dict, ShapeClassifier, np.ndarray, np.ndarray]:
+    """One model on the photos -> (metrics, classifier, labels, scores)."""
+    classifier = ShapeClassifier(checkpoint, device=device)
+    parts = classifier.parts
+    y = np.array([parts.index(photo.part) for photo in photos])
+    scores = classifier.scores(crops)  # no size prior: scale unknown
+    metrics = classification_metrics(scores, y)
+
+    # best guess among the parts that occur in these photos
+    present = {parts.index(photo.part) for photo in photos}
+    metrics["top1_k"] = top1_among(scores, y, sorted(present))
+
+    # one answer per capture: mean probability over its cameras
+    metrics["capture_right"] = np.array(
+        list(group_top1(scores, y, [photo.group for photo in photos]).values())
+    )
+    metrics["capture_top1"] = float(metrics["capture_right"].mean())
+    metrics |= error_breakdown(y, scores.argmax(axis=1), parts)
+    return metrics, classifier, y, scores
+
+
+def write_predictions(path: Path, photos, parts, scores) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file, lineterminator="\n")
+        writer.writerow(["path", "group", "part", "pred", "prob"])
+        pred, prob = scores.argmax(axis=1), softmax(scores).max(axis=1)
+        for photo, p, pr in zip(photos, pred, prob):
+            writer.writerow(
+                [photo.path, photo.group, photo.part, parts[p], f"{pr:.3f}"]
+            )
+
+
+def print_confusions(run, classifier, y, scores) -> None:
+    print(f"[{run}] most frequent confusions:")
+    names = classifier.names
+    for pair, n in confused_pairs(
+        y, scores.argmax(axis=1), classifier.parts
+    ).most_common(5):
+        a, b = sorted(pair)
+        print(f"    {names.get(a, a)} <-> {names.get(b, b)}: {n}")
+    print()
+
+
+def print_table(rows) -> None:
+    header = (
+        f"{'model':<10}{'top1':>7}{'top3':>7}{'top1_k':>9}"
+        f"{'capture':>9}{'mF1':>7}{'conf':>7}{'len err':>9}{'other':>7}"
+    )
+    print(header)
+    print("-" * len(header))
+    for run, m in rows:
+        print(
+            f"{run:<10}{m['top1']:>7.1%}{m['top3']:>7.1%}"
+            f"{m['top1_k']:>9.1%}{m['capture_top1']:>9.1%}{m['macro_f1']:>7.3f}"
+            f"{m['conf']:>7.2f}{m['errors_length']:>9}{m['errors_other']:>7}"
+        )
+
+
+def print_mcnemar(results) -> None:
+    """Paired tests between every two models, on images and on captures."""
+    runs = list(results)
+    if len(runs) < 2:
+        return
+    print("\nMcNemar (only A right / only B right, p):")
+    for i, a in enumerate(runs):
+        for b in runs[i + 1 :]:
+            img = mcnemar_p(results[a][0], results[b][0])
+            cap = mcnemar_p(results[a][1], results[b][1])
+            print(
+                f"  {a} vs {b}:  images {img[0]}/{img[1]} p={img[2]:.3f}"
+                f"   captures {cap[0]}/{cap[1]} p={cap[2]:.3f}"
+            )
+
+
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default=None)
     parser.add_argument("--split", default="val", choices=["train", "val", "test"])
     parser.add_argument("--models", nargs="*", default=None)
-    args = parser.parse_args()
+    return parser.parse_args()
 
+
+def main():
+    args = parse_args()
     if args.split == "test":
         print("[warn] test split: report these numbers, never tune on them\n")
 
@@ -72,75 +153,19 @@ def main():
         f"(the ones every model knows)\n"
     )
 
-    results = {}  # model -> per image right?, per capture right?
-    rows = []
+    results, rows = {}, []  # run -> (per image right?, per capture right?)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     for checkpoint in checkpoints:
         run = checkpoint.stem.removeprefix("shape_")
-        classifier = ShapeClassifier(checkpoint, device=device)
-
-        parts = classifier.parts
-        y = np.array([parts.index(photo.part) for photo in photos])
-        scores = classifier.scores(crops)  # no size prior: scale unknown
-        metrics = classification_metrics(scores, y)
-
-        # best guess among the parts that occur in these photos
-        present = {parts.index(photo.part) for photo in photos}
-        metrics["top1_k"] = top1_among(scores, y, sorted(present))
-
-        # one answer per capture: mean probability over its cameras
-        capture_right = np.array(
-            list(group_top1(scores, y, [photo.group for photo in photos]).values())
-        )
-        metrics["capture_top1"] = float(capture_right.mean())
-
-        pred = scores.argmax(axis=1)
-        metrics |= error_breakdown(y, pred, parts)
-        results[run] = (pred == y, capture_right)
+        metrics, classifier, y, scores = evaluate(checkpoint, photos, crops, device)
+        out = processed_dir() / f"eval_internet_{args.split}_{run}.csv"
+        write_predictions(out, photos, classifier.parts, scores)
+        print_confusions(run, classifier, y, scores)
+        results[run] = (scores.argmax(axis=1) == y, metrics.pop("capture_right"))
         rows.append((run, metrics))
 
-        out = processed_dir() / f"eval_internet_{args.split}_{run}.csv"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "w", newline="", encoding="utf-8") as file:
-            writer = csv.writer(file, lineterminator="\n")
-            writer.writerow(["path", "group", "part", "pred", "prob"])
-            for photo, p, prob in zip(photos, pred, softmax(scores).max(axis=1)):
-                writer.writerow(
-                    [photo.path, photo.group, photo.part, parts[p], f"{prob:.3f}"]
-                )
-
-        print(f"[{run}] most frequent confusions:")
-        for pair, n in confused_pairs(y, pred, parts).most_common(5):
-            a, b = sorted(pair)
-            print(
-                f"    {classifier.names.get(a, a)} <-> {classifier.names.get(b, b)}: {n}"
-            )
-        print()
-
-    header = (
-        f"{'model':<10}{'top1':>7}{'top3':>7}{'top1_k':>9}"
-        f"{'capture':>9}{'mF1':>7}{'conf':>7}{'len err':>9}{'other':>7}"
-    )
-    print(header)
-    print("-" * len(header))
-    for run, m in rows:
-        print(
-            f"{run:<10}{m['top1']:>7.1%}{m['top3']:>7.1%}"
-            f"{m['top1_k']:>9.1%}{m['capture_top1']:>9.1%}{m['macro_f1']:>7.3f}"
-            f"{m['conf']:>7.2f}{m['errors_length']:>9}{m['errors_other']:>7}"
-        )
-
-    runs = list(results)
-    if len(runs) > 1:
-        print("\nMcNemar (only A right / only B right, p):")
-        for i, a in enumerate(runs):
-            for b in runs[i + 1 :]:
-                img = mcnemar_p(results[a][0], results[b][0])
-                cap = mcnemar_p(results[a][1], results[b][1])
-                print(
-                    f"  {a} vs {b}:  images {img[0]}/{img[1]} p={img[2]:.3f}"
-                    f"   captures {cap[0]}/{cap[1]} p={cap[2]:.3f}"
-                )
+    print_table(rows)
+    print_mcnemar(results)
 
 
 if __name__ == "__main__":

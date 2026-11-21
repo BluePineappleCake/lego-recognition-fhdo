@@ -140,26 +140,19 @@ def evaluate_on_internet_val(model, internet_val, data: TrainData) -> dict:
     return metrics
 
 
-def main():
-    args = parse_args()
-    config = TrainConfig.from_yaml(args.config, seed=args.seed, epochs=args.epochs)
-    if args.sanity:
-        # one pass over the same batch; without label smoothing the loss can reach 0
-        config = replace(config, epochs=1, label_smoothing=0.0)
-    set_seed(config.seed)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+def load_data(config: TrainConfig, internet_data, device):
+    """Training data -> (data, train arrays, train batches, val batches per source).
 
-    # 1. data
-    roots = dict.fromkeys(["internet_photos", "internet_renders"], args.internet_data)
+    Every source with images in its val split is checked after every epoch.
+    """
+    roots = dict.fromkeys(["internet_photos", "internet_renders"], internet_data)
     data = load_training_data(config, roots)
     train_arrays = combine_train(data, config.train_on, config.real_repeat)
     print(
         f"[data] train on {', '.join(config.train_on)}: {len(train_arrays[1])} "
         f"images (photos {config.real_repeat}x), {len(data.parts)} classes"
     )
-
     train = Batches(*train_arrays, device, config.batch_size, shuffle=True)
-    # every source with images in its val split, checked after every epoch
     vals = {
         source: Batches(*splits["val"], device, EVAL_BATCH_SIZE)
         for source, splits in data.sources.items()
@@ -167,39 +160,27 @@ def main():
     }
     if config.select_on not in vals:
         raise ValueError(f"select_on {config.select_on} has no val images")
+    return data, train_arrays, train, vals
 
-    # 2. logging
-    run = start_wandb_run(config, data, args.sanity)
-    print(f"[run] device {device}")
-    log_sample_images(train_arrays, data, device, config)
 
-    # 3. model and training
-    model = SmallCNN(len(data.parts), config.width, config.dropout)
-    model.to(device)
-    run.summary["params"] = sum(p.numel() for p in model.parameters())
-
-    if args.sanity:
-        one_batch = next(iter(Batches(*train_arrays, device, 32, shuffle=True)))
-        train = [one_batch] * 50
-
+def optimizer_for(model, config: TrainConfig, steps: int):
+    """AdamW with a one-cycle learning rate, and the loss function."""
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, config.lr, total_steps=config.epochs * len(train)
+        optimizer, config.lr, total_steps=steps
     )
     loss_fn = nn.CrossEntropyLoss(label_smoothing=config.label_smoothing)
+    return optimizer, scheduler, loss_fn
 
-    if args.sanity:
-        loss = overfit_one_batch(model, train, optimizer, scheduler, loss_fn, config)
-        print(f"[sanity] loss on that batch after training {loss:.4f} (should be ~0)")
-        run.finish()
-        return
 
-    MODELS_DIR.mkdir(exist_ok=True)
-    checkpoint = MODELS_DIR / f"shape_{run.id}.pt"
+def train_and_keep_best(
+    model, train, vals, optimizer, scheduler, loss_fn, config, data, checkpoint
+) -> None:
+    """All epochs. After each one: evaluate every val split, log to W&B, and
+    save the model if it is the best so far on config.select_on (macro-F1)."""
     best_val_f1 = -1.0
-
     for epoch in range(config.epochs):
         start = time.time()
         train_loss, train_acc = train_epoch(
@@ -234,13 +215,16 @@ def main():
                 data.split_hash,
             )
 
-    # 4. final test with the best checkpoint
+
+def final_test(model, checkpoint, data: TrainData, vals, config, device) -> dict:
+    """The best checkpoint once on the render test splits and on internet/val.
+    The test splits of the photos belong to scripts/eval_*.py."""
     model.load_state_dict(load_checkpoint(checkpoint, device)["model"])
     test_metrics = {}
     for source in config.train_on:
         test = data.sources[source]["test"]
         if source in PHOTO_SOURCES or not len(test[1]):
-            continue  # photo test splits belong to scripts/eval_*.py
+            continue
         name = prefix(source, "test")
         batches = Batches(*test, device, EVAL_BATCH_SIZE)
         metrics = evaluate_on_test(model, batches, data, name)
@@ -248,6 +232,45 @@ def main():
     if "internet_photos" in vals:
         real_metrics = evaluate_on_internet_val(model, vals["internet_photos"], data)
         test_metrics |= {f"internet_val_{key}": v for key, v in real_metrics.items()}
+    return test_metrics
+
+
+def main():
+    args = parse_args()
+    config = TrainConfig.from_yaml(args.config, seed=args.seed, epochs=args.epochs)
+    if args.sanity:
+        # one pass over the same batch; without label smoothing the loss can reach 0
+        config = replace(config, epochs=1, label_smoothing=0.0)
+    set_seed(config.seed)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    data, train_arrays, train, vals = load_data(config, args.internet_data, device)
+
+    run = start_wandb_run(config, data, args.sanity)
+    print(f"[run] device {device}")
+    log_sample_images(train_arrays, data, device, config)
+
+    model = SmallCNN(len(data.parts), config.width, config.dropout).to(device)
+    run.summary["params"] = sum(p.numel() for p in model.parameters())
+
+    if args.sanity:  # the same batch 50 times: can the model learn at all?
+        one_batch = next(iter(Batches(*train_arrays, device, 32, shuffle=True)))
+        train = [one_batch] * 50
+    optimizer, scheduler, loss_fn = optimizer_for(
+        model, config, config.epochs * len(train)
+    )
+    if args.sanity:
+        loss = overfit_one_batch(model, train, optimizer, scheduler, loss_fn, config)
+        print(f"[sanity] loss on that batch after training {loss:.4f} (should be ~0)")
+        run.finish()
+        return
+
+    MODELS_DIR.mkdir(exist_ok=True)
+    checkpoint = MODELS_DIR / f"shape_{run.id}.pt"
+    train_and_keep_best(
+        model, train, vals, optimizer, scheduler, loss_fn, config, data, checkpoint
+    )
+    test_metrics = final_test(model, checkpoint, data, vals, config, device)
 
     artifact = wandb.Artifact("shape-cnn", type="model", metadata=test_metrics)
     artifact.add_file(str(checkpoint))
