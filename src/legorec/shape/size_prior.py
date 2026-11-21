@@ -9,7 +9,7 @@ that: it sees every brick scaled to 96 x 96.
 
 The table data/reference/part_sizes.csv holds per part the median and the
 spread of log(long side) and log(short side) in mm, measured on the train
-sheet photos with the brick finder (scripts/size_check.py --table). It is the
+sheet photos with the brick finder (scripts/size_check.py). It is the
 same measurement as at prediction time, so the mask and perspective (the top
 of a brick is closer to the camera than the sheet) are already in it.
 

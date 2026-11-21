@@ -192,7 +192,7 @@ brick in mm, which the sheet gives us for free, fix the length errors?
   part, median and robust spread of log(long side) and log(short side) of
   the smallest rotated rectangle around the mask, measured on the **train**
   sheet photos ([`data/reference/part_sizes.csv`](../data/reference/part_sizes.csv),
-  `scripts/size_check.py --table`). Added to the CNN scores as
+  `scripts/size_check.py`). Added to the CNN scores as
   log P(size | part). No training, no tuning on test.
 
 **Result 1: finding bricks is not the bottleneck** (old models, 13 parts,
