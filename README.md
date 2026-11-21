@@ -142,12 +142,16 @@ pytest   # all tests should pass; without PyTorch a few are skipped. No dataset 
 The data is **not** in this repository. [`data/README.md`](data/README.md)
 shows the folder layout and how to download everything.
 
-- **Renders (training):**
+- **Training data for the team's model:** photos and renders of 18 parts
+  from the [TU Gdańsk LEGO set](https://mostwiedzy.pl/en/open-research-data/lego-bricks-for-training-classification-network,202309140842198941751-0)
+  into `data/raw/internet/`, and our own renders into `data/raw/own_renders/`.
+  Which folders and how to name them: [`data/README.md`](data/README.md),
+  sections 2b and 2d.
+- **Kaggle renders (older models only):**
   [Images of LEGO Bricks](https://www.kaggle.com/datasets/joosthazelzet/lego-brick-images)
-  by J. Hazelzet, 40,000 images of 50 part types. Unzip them into
-  `data/raw/renders/`. The code expects the folder that *directly* contains
-  the 40,000 PNGs: `data/raw/renders/dataset/`. The download also contains an
-  older version of the dataset ("LEGO brick images v1"). Do not use that one.
+  by J. Hazelzet, 40,000 images of 50 part types, into `data/raw/renders/`
+  (the code expects `data/raw/renders/dataset/`). Only the older configs need
+  them; ignore the folder "LEGO brick images v1" in the download.
 - **Real photos (fine-tuning and test):** our own photos, in a private Kaggle
   dataset.
 - **Splits:** the files `data/splits/*.csv` say which image belongs to train,
