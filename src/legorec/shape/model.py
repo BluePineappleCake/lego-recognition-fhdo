@@ -164,8 +164,8 @@ class ShapeClassifier:
 
     real_scale: converts brick sizes in photo pixels to render pixels,
         real_scale = (render pixels per mm) / (photo pixels per mm).
-    Only needed for models trained with size_feature. Rough calibration: see
-    scripts/predict_shape.py.
+    Only needed for models trained with size_feature (Kaggle renders); our
+    photos do not give that scale, so those models are not used on them.
     size_prior: legorec.shape.size_prior.SizePrior. If given, predict() and
         crop_scores() also weigh how well the measured size fits each part.
         Only for crops from a sheet photo (known px per mm).
