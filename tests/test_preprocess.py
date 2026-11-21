@@ -1,13 +1,17 @@
 import numpy as np
 from PIL import Image
 
-from legorec.shape.preprocess import (
-    _to_grey,
-    brick_mask,
-    preprocess_crop,
-    preprocess_image,
-)
+from legorec.segment.single import _to_rgb, brick_mask
+from legorec.shape.preprocess import _to_grey, preprocess_crop
 from legorec.types import BrickCrop
+
+
+def preprocess_image(image, size=96):
+    """One brick on a plain background, mask by brick_mask, as the training
+    images where YOLO finds nothing."""
+    rgb = _to_rgb(image)
+    h, w = rgb.shape[:2]
+    return preprocess_crop(BrickCrop(rgb, brick_mask(rgb), (0, 0, w, h)), size)
 
 
 def _rect_image(w=120, h=40, size=400, bg=200, fg=60):
@@ -141,22 +145,28 @@ def test_flat_brick_does_not_crash():
     assert x.shape == (96, 96)
 
 
-def test_preprocess_images_with_yolo_masks_and_fallback(monkeypatch):
-    from legorec.segment import bricks
-    from legorec.shape.preprocess import preprocess_image, preprocess_images
+def test_single_brick_crops_use_yolo_and_fall_back_to_brick_mask(monkeypatch):
+    from legorec.segment import single
 
     image = np.full((60, 80, 3), 200, np.uint8)
     image[20:40, 20:60] = 40  # the brick
     image[40:48, 20:60] = 150  # its shadow: brick_mask takes it, YOLO not
     yolo = np.zeros((60, 80), bool)
     yolo[20:40, 20:60] = True
-    monkeypatch.setattr(bricks, "single_brick_masks", lambda images: [yolo, None])
+    monkeypatch.setattr(
+        single, "single_brick_masks", lambda images, model=None: [yolo, None]
+    )
 
-    arrays, fallbacks = preprocess_images([image, image], 32)
+    crops, fallbacks = single.single_brick_crops([image, image])
     assert fallbacks == 1  # second image: YOLO found nothing
-    assert np.array_equal(arrays[1], preprocess_image(image, 32))  # brick_mask
-    assert not np.array_equal(arrays[0], arrays[1])  # YOLO: without the shadow
-    assert preprocess_images([], 32) == ([], 0)  # no YOLO needed
+    assert np.array_equal(crops[0].mask, yolo)
+    assert np.array_equal(crops[1].mask, brick_mask(image))  # with the shadow
+    assert single.single_brick_crops([]) == ([], 0)  # no YOLO needed
+
+
+def test_empty_mask_gives_the_whole_image():
+    crop = BrickCrop(_rect_image(), np.zeros((400, 400), bool), (0, 0, 400, 400))
+    assert preprocess_crop(crop).shape == (96, 96)
 
 
 def test_grey_is_the_same_for_pil_image_and_numpy_array():

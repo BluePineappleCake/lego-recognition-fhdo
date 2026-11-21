@@ -240,7 +240,7 @@ afterwards.
 | `--sanity` | run only the sanity check |
 
 **Settings:** all settings and their defaults are in `TrainConfig`
-(`src/legorec/shape/train.py`). A config file only lists what it changes. A
+(`src/legorec/shape/training.py`). A config file only lists what it changes. A
 key that is not a setting there (e.g. the typo `epoch: 5`) stops the run with
 an error. This is on purpose: a typo must not quietly change an experiment.
 
@@ -289,30 +289,31 @@ Both explain at the top what they report. `eval_own.py` uses the test split of
 our sheet photos by default; comparing several models is only fair on the
 parts that all of them know, and the script does exactly that.
 
-## Use the shape model in code
+## Use the pipeline in code
 
-This is the interface for the other pipeline steps:
+This is the interface for the other pipeline steps (colour, inventory):
 
 ```python
-from legorec.shape.predict import predict
+import cv2
+from legorec.pipeline import find_and_name
 
-# crop: a BrickCrop from the segmentation step
-part, confidence = predict(crop)  # e.g. ("3001", 0.93)
+for brick in find_and_name(cv2.imread("IMG_8844.jpg")):
+    print(brick.part, brick.confidence, brick.crop.bbox)  # e.g. 3001 0.93 (...)
 ```
 
+- `brick.crop` is a `BrickCrop`: the image, the mask of the brick and its
+  position on the sheet (8 px/mm). The colour step starts from it.
 - `confidence` is the model's probability for its answer (0 to 1). It is **not
   calibrated** yet: on real photos the model can be wrong with 70–80 %
   confidence.
-- The size prior is on, as in `find_bricks.py`: `crop` must come from a sheet
-  photo (8 px/mm). For crops with another scale use
-  `load_model(size_prior=None)`.
-- A photo without bricks: `ShapeClassifier.predict([])` returns `[]`.
+- Only the shape step, for crops you already have:
+  `load_classifier().predict(crops)` (`legorec.shape.classifier`). The size
+  prior is on there, so the crops must come from a sheet photo; for other
+  images use `load_classifier(size_prior=None)`.
 - The model is loaded from `models/shape.pt`, or from the file named in the
   environment variable `LEGOREC_SHAPE_MODEL`.
-- Every model is trained and used with the same preprocessing
-  (`src/legorec/shape/preprocess.py`). Checkpoints of older experiments
-  (Kaggle, size feature, ...) are refused with a message: they need the Git
-  tag `v1-legacy`.
+- Checkpoints of older experiments (Kaggle, size feature, ...) are refused
+  with a message: they need the Git tag `v1-legacy`.
 
 **Get the team's default model.** It is the W&B artifact `shape-cnn:default`
 (which run it is and why: [experiment log](docs/experiments.md)). Download it
@@ -344,31 +345,37 @@ Every file starts with a docstring that explains the idea behind it.
 
 ### Where to start reading
 
-**Finding the bricks**, from the photo to the crops:
+Read these five files in this order; together they are the whole pipeline:
+
+1. `src/legorec/pipeline.py`: photo in, named bricks out, in 20 lines
+2. `src/legorec/segment/bricks.py`: how YOLO finds the bricks on the sheet
+3. `src/legorec/shape/preprocess.py`: one brick → the 96 × 96 grey image the CNN sees
+4. `src/legorec/shape/classifier.py`: the trained CNN plus the size prior → part number
+5. `src/legorec/shape/training.py` and `scripts/train_shape.py`: how the CNN is trained
+
+All files, by pipeline step:
 
 | File | What it does |
 |---|---|
+| `src/legorec/pipeline.py` | `find_and_name(photo)`: the whole pipeline on one sheet photo |
+| `src/legorec/types.py` | `BrickCrop`, the data passed from one step to the next |
+| **Finding the bricks** | |
 | `src/legorec/segment/sheet.py` | finds the 4 ArUco markers, warps the brick area flat (`brick_area`) |
 | `src/legorec/segment/bricks.py` | `bricks_on_sheet(photo)`: one `BrickCrop` per brick, found by YOLO-seg |
-| `src/legorec/segment/yolo.py` | YOLO segmentation labels (one class "brick") |
-| `src/legorec/types.py` | `BrickCrop`, the data passed from one step to the next |
-
-**The shape step**, in the order the data flows through it:
-
-| File | What it does |
-|---|---|
-| `src/legorec/data/splits.py` | train / val / test files in `data/splits/`, the same for the whole team |
-| `src/legorec/data/renders.py` | the renders (internet set, our LDraw renders): index, split by pose |
-| `src/legorec/data/internet.py` | the internet photos: index, split by capture |
-| `src/legorec/data/sheets.py` | our sheet photos: index, split by photo, sessions |
-| `src/legorec/shape/preprocess.py` | one brick image → 96 × 96 grey crop (the same code for renders and photos) |
-| `src/legorec/shape/augment.py` | random rotation, zoom, shift and lighting for every training batch |
-| `src/legorec/shape/model.py` | the CNN, checkpoints, `ShapeClassifier` for new images |
-| `src/legorec/shape/train.py` | `TrainConfig` (all settings), the training sources (`train_on`), the image cache, one training epoch, evaluation |
+| `src/legorec/segment/single.py` | the same for images with one brick each (training images): YOLO, `brick_mask` as fallback |
+| `src/legorec/segment/labels.py` | YOLO label files (one class "brick"), for training YOLO |
+| **Naming the part** | |
+| `src/legorec/shape/preprocess.py` | one `BrickCrop` → 96 × 96 grey image (the same code for training and use) |
+| `src/legorec/shape/model.py` | the CNN and its checkpoint files |
+| `src/legorec/shape/classifier.py` | `ShapeClassifier`: a trained CNN used on new crops, with the size prior |
 | `src/legorec/shape/size_prior.py` | the size prior: how well the measured size in mm fits each part |
-| `scripts/train_shape.py` | puts it together: data → W&B run → training → test |
+| **Training** | |
+| `src/legorec/data/splits.py` | train / val / test files in `data/splits/`, the same for the whole team |
+| `src/legorec/data/renders.py`, `internet.py`, `sheets.py` | the data sources: index, split, sessions |
+| `src/legorec/shape/training_data.py` | the training sources (`train_on`), preprocessed and cached |
+| `src/legorec/shape/training.py` | `TrainConfig` (all settings), one training epoch, evaluation |
+| `src/legorec/shape/augment.py`, `batches.py` | random rotation, zoom and lighting per batch; batches on the GPU |
 | `src/legorec/eval/metrics.py` | top-1, top-3, macro-F1, length errors, McNemar test |
-| `src/legorec/shape/predict.py` | `predict(crop)`, the interface for the other pipeline steps |
 
 **Scripts** (each explains its options at the top):
 

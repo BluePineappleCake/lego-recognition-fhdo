@@ -7,7 +7,7 @@
 --internet-data: folder with photos/ and renders/ of the internet dataset
     (default: data/raw/internet). If photos/ is missing and not in train_on,
     it is skipped.
-All settings and their defaults: TrainConfig in src/legorec/shape/train.py.
+All settings and their defaults: TrainConfig in src/legorec/shape/training.py.
 To try a trained model on real photos, use scripts/eval_own.py.
 
 What happens, in order:
@@ -34,19 +34,21 @@ from torch import nn
 from legorec.eval.metrics import classification_metrics, error_breakdown
 from legorec.paths import MODELS_DIR
 from legorec.shape.augment import augment_batch, denormalize
-from legorec.shape.loaders import Batches
+from legorec.shape.batches import Batches
 from legorec.shape.model import SmallCNN, load_checkpoint, save_checkpoint
 from legorec.shape.preprocess import PREPROCESS_VERSION
-from legorec.shape.train import (
-    PHOTO_SOURCES,
+from legorec.shape.training import (
     TrainConfig,
-    TrainData,
-    combine_train,
     evaluate,
-    load_training_data,
     overfit_one_batch,
     set_seed,
     train_epoch,
+)
+from legorec.shape.training_data import (
+    PHOTO_SOURCES,
+    TrainData,
+    combine_train,
+    load_training_data,
 )
 
 EVAL_BATCH_SIZE = 512  # no gradients during evaluation, so bigger batches fit

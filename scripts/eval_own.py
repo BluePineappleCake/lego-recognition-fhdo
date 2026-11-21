@@ -55,12 +55,8 @@ from legorec.eval.metrics import (
     top1_among,
 )
 from legorec.paths import MODELS_DIR, own_photos_dir, processed_dir
-from legorec.shape.model import (
-    ShapeClassifier,
-    load_checkpoint,
-    parts_known_by_all,
-    usable_checkpoints,
-)
+from legorec.shape.classifier import ShapeClassifier
+from legorec.shape.model import load_checkpoint, parts_known_by_all, usable_checkpoints
 from legorec.shape.size_prior import SizePrior
 
 
@@ -138,7 +134,7 @@ def evaluate(checkpoint, bricks, crops, device, size_prior=None):
     classifier = ShapeClassifier(checkpoint, device=device, size_prior=size_prior)
     parts = classifier.parts
     y = np.array([parts.index(brick.part) for brick in bricks])
-    scores = classifier.crop_scores(crops)
+    scores = classifier.scores(crops)
     m = classification_metrics(scores, y)
     m["top1_k"] = top1_among(scores, y, sorted(set(y)))
     photo_right = group_top1(scores, y, [brick.group for brick in bricks])

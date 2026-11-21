@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from legorec.segment.yolo import (
+from legorec.segment.labels import (
     label_line,
     mask_to_polygon,
     read_label_file,

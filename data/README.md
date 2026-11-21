@@ -130,7 +130,7 @@ In both, the column `original` is the path relative to `own_photos/`
 (`filename` points to a sorted copy that no longer exists).
 
 YOLO-seg finds the bricks (one class "brick", see
-`legorec.segment.yolo`):
+`legorec.segment.labels`):
 
 1. `python scripts/export_yolo.py`: warps every photo and writes a YOLO data
    set to `processed/yolo_bricks/`. The outlines are the corrected labels

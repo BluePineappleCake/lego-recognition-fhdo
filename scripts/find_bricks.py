@@ -10,8 +10,8 @@ For every photo writes to --out (default $LEGOREC_PROCESSED/find_bricks/):
     <photo>.jpg          the brick area with numbered outlines (+ part, %)
     <photo>_b01.png ...  one crop per brick (as the shape CNN gets it)
 
-and prints one line per brick. Finding bricks: legorec.segment.bricks_on_sheet
-(YOLO, needs models/bricks_yolo.pt, see there). Parts: the shape model
+and prints one line per brick. The pipeline itself: legorec.pipeline.
+Finding bricks needs models/bricks_yolo.pt (legorec.segment.bricks). Parts: the shape model
 (default models/shape.pt) plus the measured size in mm (size prior,
 data/reference/part_sizes.csv; --no-size-prior to switch it off). The
 confidences are not calibrated yet.
@@ -24,6 +24,7 @@ import cv2
 import numpy as np
 
 from legorec.paths import processed_dir
+from legorec.pipeline import find_and_name
 from legorec.segment import brick_area, bricks_on_sheet
 from legorec.segment.sheet import PX_PER_MM
 
@@ -57,10 +58,10 @@ def main():
 
     classifier = None
     if not args.no_shape:
-        from legorec.shape.predict import load_model  # here: needs torch
+        from legorec.shape.classifier import load_classifier  # here: needs torch
 
         prior = None if args.no_size_prior else "auto"
-        classifier = load_model(args.shape_model, size_prior=prior)
+        classifier = load_classifier(args.shape_model, size_prior=prior)
         print(f"[shape] size prior: {'on' if classifier.size_prior else 'off'}")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -71,12 +72,16 @@ def main():
             print(f"[skip] {path}: not an image")
             continue
         try:
-            crops = bricks_on_sheet(photo, args.brick_model)
-        except ValueError as error:
+            if classifier:  # the whole pipeline
+                found = find_and_name(photo, classifier, args.brick_model)
+                crops = [brick.crop for brick in found]
+                labels = [f"{b.part} {b.confidence:.0%}" for b in found]
+            else:  # only find the bricks
+                crops = bricks_on_sheet(photo, args.brick_model)
+                labels = [""] * len(crops)
+        except ValueError as error:  # markers not found
             print(f"[skip] {path}: {error}")
             continue
-        parts = classifier.predict(crops) if classifier and crops else []
-        labels = [f"{part} {conf:.0%}" for part, conf in parts] or [""] * len(crops)
 
         print(f"{path.name}: {len(crops)} bricks")
         for number, (crop, label) in enumerate(zip(crops, labels), start=1):

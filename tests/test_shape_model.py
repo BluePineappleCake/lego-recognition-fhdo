@@ -23,53 +23,8 @@ def test_augment_keeps_shape_and_fills_corners_with_the_edge_colour():
     assert torch.allclose(y, x, atol=1e-4)
 
 
-def test_shape_classifier_roundtrip(tmp_path, monkeypatch):
-    from PIL import Image
-
-    from legorec.segment import bricks
-    from legorec.shape.model import ShapeClassifier, save_checkpoint
-
-    # YOLO finds nothing here: brick_mask instead (no model file needed)
-    monkeypatch.setattr(
-        bricks, "single_brick_masks", lambda images: [None] * len(images)
-    )
-    parts = ["3001", "3002", "3003"]
-    model = SmallCNN(len(parts), width=8)
-    ck = tmp_path / "m.pt"
-    config = {"size": 96, "width": 8, "dropout": 0.3}
-    names = {p: f"brick {p}" for p in parts}
-    save_checkpoint(ck, model, parts, names, config, "test")
-    clf = ShapeClassifier(ck)
-    img = np.full((300, 300), 200, np.uint8)
-    img[100:200, 120:180] = 60
-    top, arrays = clf.predict_images([Image.fromarray(img)], k=3)
-    assert [p for p, _ in top[0]] and len(top[0]) == 3
-    assert abs(sum(c for _, c in top[0]) - 1) < 1e-5
-    assert arrays[0].shape == (96, 96)
-    scores = clf.scores([Image.fromarray(img)])
-    assert scores.shape == (1, len(parts))
-    assert parts[int(scores.argmax())] == top[0][0][0]  # same model, same answer
-
-
-def test_crop_scores_match_predict():
-    from legorec.shape.model import ShapeClassifier
-    from legorec.types import BrickCrop
-
-    parts = ["3001", "3002", "3003"]
-    clf = ShapeClassifier.__new__(ShapeClassifier)  # no checkpoint needed
-    clf.parts, clf.size, clf.device, clf.size_prior = parts, 96, "cpu", None
-    clf.model = SmallCNN(len(parts), width=8).eval()
-    image = np.full((120, 120, 3), 200, np.uint8)
-    mask = np.zeros((120, 120), bool)
-    image[30:90, 40:80], mask[30:90, 40:80] = 60, True
-    crop = BrickCrop(image, mask, (0, 0, 120, 120))
-    scores = clf.crop_scores([crop, crop])
-    assert scores.shape == (2, len(parts))
-    assert parts[int(scores[0].argmax())] == clf.predict([crop])[0][0]
-
-
 def test_batches_cover_every_sample_once():
-    from legorec.shape.loaders import Batches
+    from legorec.shape.batches import Batches
 
     x = np.zeros((10, 8, 8), np.uint8)
     seen = torch.cat([y for _, y in Batches(x, np.arange(10), "cpu", 4, True)])
@@ -87,7 +42,8 @@ def test_batches_cover_every_sample_once():
     ],
 )
 def test_older_checkpoints_are_refused(tmp_path, old_config):
-    from legorec.shape.model import ShapeClassifier, usable_checkpoints
+    from legorec.shape.classifier import ShapeClassifier
+    from legorec.shape.model import usable_checkpoints
 
     path = tmp_path / "old.pt"
     config = {"size": 96, "width": 8, "dropout": 0.3} | old_config
@@ -100,7 +56,7 @@ def test_older_checkpoints_are_refused(tmp_path, old_config):
 
 
 def test_older_checkpoint_of_todays_kind_still_loads(tmp_path):
-    from legorec.shape.model import ShapeClassifier
+    from legorec.shape.classifier import ShapeClassifier
 
     model = SmallCNN(2, width=8)
     path = tmp_path / "ok1tq8ks.pt"

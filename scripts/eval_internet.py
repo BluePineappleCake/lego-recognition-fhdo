@@ -40,11 +40,9 @@ from legorec.eval.metrics import (
     top1_among,
 )
 from legorec.paths import MODELS_DIR, internet_dir, processed_dir
-from legorec.shape.model import (
-    ShapeClassifier,
-    parts_known_by_all,
-    usable_checkpoints,
-)
+from legorec.segment.single import single_brick_crops
+from legorec.shape.classifier import ShapeClassifier
+from legorec.shape.model import parts_known_by_all, usable_checkpoints
 
 
 def main():
@@ -65,6 +63,8 @@ def main():
     )
     photos = only_parts(photos_per_split[args.split], parts_known_by_all(checkpoints))
     images = [Image.open(photo.path).convert("RGB") for photo in photos]
+    crops, fallbacks = single_brick_crops(images)  # as in training: YOLO mask
+    print(f"[data] YOLO found no brick in {fallbacks} photos: brick_mask there")
     groups = sorted({photo.group for photo in photos})
     print(
         f"[data] internet/{args.split} (split {split_hash}): {len(photos)} photos, "
@@ -81,7 +81,7 @@ def main():
 
         parts = classifier.parts
         y = np.array([parts.index(photo.part) for photo in photos])
-        scores = classifier.scores(images)
+        scores = classifier.scores(crops)  # no size prior: scale unknown
         metrics = classification_metrics(scores, y)
 
         # best guess among the parts that occur in these photos
