@@ -1,7 +1,7 @@
 """Find the bricks on sheet photos and say which part each one is.
 
     python scripts/find_bricks.py data/raw/own_photos/MIXED*/IMG_8844.jpg
-    python scripts/find_bricks.py photo1.jpg photo2.jpg --method threshold
+    python scripts/find_bricks.py photo1.jpg photo2.jpg
     python scripts/find_bricks.py photo.jpg --shape-model models/shape_rydhagpu.pt
     python scripts/find_bricks.py photo.jpg --no-shape          # only find bricks
 
@@ -11,7 +11,7 @@ For every photo writes to --out (default $LEGOREC_PROCESSED/find_bricks/):
     <photo>_b01.png ...  one crop per brick (as the shape CNN gets it)
 
 and prints one line per brick. Finding bricks: legorec.segment.bricks_on_sheet
-("yolo" needs models/bricks_yolo.pt, see there). Parts: the shape model
+(YOLO, needs models/bricks_yolo.pt, see there). Parts: the shape model
 (default models/shape.pt) plus the measured size in mm (size prior,
 data/reference/part_sizes.csv; --no-size-prior to switch it off). The
 confidences are not calibrated yet.
@@ -48,7 +48,6 @@ def draw(area: np.ndarray, crops, labels: list[str]) -> np.ndarray:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("photos", nargs="+")
-    parser.add_argument("--method", default="yolo", choices=["yolo", "threshold"])
     parser.add_argument("--brick-model", default=None, help="YOLO model (.pt)")
     parser.add_argument("--shape-model", default=None, help="shape CNN (.pt)")
     parser.add_argument("--no-shape", action="store_true")
@@ -72,14 +71,14 @@ def main():
             print(f"[skip] {path}: not an image")
             continue
         try:
-            crops = bricks_on_sheet(photo, args.method, args.brick_model)
+            crops = bricks_on_sheet(photo, args.brick_model)
         except ValueError as error:
             print(f"[skip] {path}: {error}")
             continue
         parts = classifier.predict(crops) if classifier and crops else []
         labels = [f"{part} {conf:.0%}" for part, conf in parts] or [""] * len(crops)
 
-        print(f"{path.name}: {len(crops)} bricks ({args.method})")
+        print(f"{path.name}: {len(crops)} bricks")
         for number, (crop, label) in enumerate(zip(crops, labels), start=1):
             name = f"{path.stem}_b{number:02d}.png"
             cv2.imwrite(str(out / name), cv2.cvtColor(crop.image, cv2.COLOR_RGB2BGR))

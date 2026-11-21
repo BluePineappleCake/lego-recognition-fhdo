@@ -3,18 +3,18 @@ pipeline.
 
     from legorec.segment import bricks_on_sheet
 
-    crops = bricks_on_sheet(cv2.imread("IMG_3482.jpg"))            # YOLO-seg
-    crops = bricks_on_sheet(photo, method="threshold")             # find_bricks
+    crops = bricks_on_sheet(cv2.imread("IMG_3482.jpg"))
 
-Both methods work on the brick area, warped flat with the 4 ArUco markers
-(brick_area). The bbox of a crop is in pixels of that area (PX_PER_MM per
-mm), not of the raw photo.
+YOLO-seg (one class "brick") finds the bricks on the brick area, warped flat
+with the 4 ArUco markers (brick_area). The bbox of a crop is in pixels of that
+area (PX_PER_MM per mm), not of the raw photo.
 
-"yolo" needs the optional dependency (pip install -e .[detect]) and a
-trained model at models/bricks_yolo.pt (or $LEGOREC_BRICK_MODEL): copy
-runs/segment/train/weights/best.pt there. It was trained on the outlines of
-"threshold" plus some corrected by hand; whether it separates touching
-bricks better is not measured yet (docs/experiments.md, 2026-11-20).
+Needs Ultralytics (pip install -e .[detect]) and a trained model at
+models/bricks_yolo.pt (or $LEGOREC_BRICK_MODEL): copy
+runs/segment/train/weights/best.pt there. The first model was trained on the
+outlines of the old colour-threshold finder plus some corrected by hand
+(docs/experiments.md, 2026-11-20); new labels start from its own drafts
+(scripts/export_yolo.py).
 """
 
 from pathlib import Path
@@ -23,11 +23,11 @@ import cv2
 import numpy as np
 
 from legorec.paths import brick_model_path
-from legorec.segment.sheet import PX_PER_MM, brick_area, find_bricks, is_frame
+from legorec.segment.sheet import PX_PER_MM, brick_area
 from legorec.types import BrickCrop
 
 IMGSZ = 1024  # as in training
-MARGIN = 25  # pixels around each brick, as in cut_bricks
+MARGIN = 25  # pixels around each brick (about 3 mm)
 INSIDE = 0.5  # a mask more than half inside a surer one is dropped
 
 # single_brick_masks: a brick is put on a canvas at about the size it has on
@@ -112,12 +112,8 @@ def single_brick_masks(
     return masks
 
 
-def brick_masks(area: np.ndarray, method: str = "yolo", model=None, conf: float = 0.25):
+def brick_masks(area: np.ndarray, model=None, conf: float = 0.25) -> list[np.ndarray]:
     """Warped brick area (BGR) -> one boolean mask (area size) per brick."""
-    if method == "threshold":
-        return [m for m in find_bricks(area) if not is_frame(m)]
-    if method != "yolo":
-        raise ValueError(f"method must be 'yolo' or 'threshold', not {method!r}")
     result = _yolo(Path(model or brick_model_path())).predict(
         area, imgsz=IMGSZ, conf=conf, retina_masks=True, verbose=False
     )[0]
@@ -140,9 +136,7 @@ def drop_inside(masks: list[np.ndarray], confidences) -> list[np.ndarray]:
     return kept
 
 
-def bricks_on_sheet(
-    photo: np.ndarray, method: str = "yolo", model=None
-) -> list[BrickCrop]:
+def bricks_on_sheet(photo: np.ndarray, model=None) -> list[BrickCrop]:
     """Photo of the capture sheet (BGR, as cv2.imread gives it) -> BrickCrops.
 
     Raises ValueError if the 4 markers are not found.
@@ -153,7 +147,7 @@ def bricks_on_sheet(
     rgb = cv2.cvtColor(area, cv2.COLOR_BGR2RGB)
     h, w = mask_shape = area.shape[:2]
     crops = []
-    for mask in brick_masks(area, method, model):
+    for mask in brick_masks(area, model):
         if mask.shape != mask_shape or not mask.any():
             continue
         ys, xs = np.nonzero(mask)

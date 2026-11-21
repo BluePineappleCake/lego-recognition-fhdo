@@ -21,6 +21,11 @@ original part folders come first.
 The "part" of a photo is the first word of its top folder ("3001", "MIXED");
 it is only used to spread every part evenly over train / val / test. For
 finding bricks (YOLO, one class) the part does not matter.
+
+Session: the phones number their photos consecutively. A jump of more than
+SESSION_GAP numbers starts a new session (so far: IMG_3415-3577 and
+IMG_8817-8922, two phones). Most parts were photographed in only one session,
+so a split by session is not possible per part yet.
 """
 
 import hashlib
@@ -36,6 +41,8 @@ SPLIT_FRACTIONS = (0.7, 0.15, 0.15)
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 # "3001 brick 2x4", "3062b round brick 1x1", "MIXED 3009+3710+3023"
 FOLDER_NAME = re.compile(r"^(\d+[a-z]?|MIXED) \S")
+SESSION_GAP = 20
+PHOTO_NUMBER = re.compile(r"IMG_(\d+)")  # "3001_IMG_3415" -> 3415
 
 
 @dataclass(frozen=True)
@@ -99,3 +106,28 @@ def load_or_create_sheet_split(photos: list[SheetPhoto], path=SPLIT_FILE):
     the file is created once and committed. New photos are added to it (by a
     hash of their name), photos already in it never change their split."""
     return load_or_create_split(photos, path, frac=SPLIT_FRACTIONS, extend=True)
+
+
+def photo_sessions(photos: list[SheetPhoto]) -> dict[str, str]:
+    """Photo group -> session, e.g. "3001_IMG_3415" -> "IMG_3415-3577".
+
+    Photos without a number like IMG_3415 in their name get the session
+    "other".
+    """
+    number_of = {}
+    for photo in photos:
+        match = PHOTO_NUMBER.search(photo.group)
+        if match:
+            number_of[photo.group] = int(match[1])
+    blocks = []
+    for number in sorted(set(number_of.values())):
+        if not blocks or number - blocks[-1][-1] > SESSION_GAP:
+            blocks.append([])
+        blocks[-1].append(number)
+    session_of_number = {
+        number: f"IMG_{block[0]}-{block[-1]}" for block in blocks for number in block
+    }
+    return {
+        photo.group: session_of_number.get(number_of.get(photo.group), "other")
+        for photo in photos
+    }

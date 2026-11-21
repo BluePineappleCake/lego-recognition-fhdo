@@ -2,11 +2,24 @@ import numpy as np
 import pytest
 from test_segment import _fake_sheet
 
+from legorec.segment import bricks
 from legorec.segment.bricks import bricks_on_sheet, drop_inside
 
 
-def test_threshold_method_gives_one_crop_per_brick():
-    crops = bricks_on_sheet(_fake_sheet(), method="threshold")
+def _red_pixels(area):
+    """Stand-in for YOLO in tests: one mask per red brick of _fake_sheet."""
+    import cv2
+
+    red = (area[..., 2] > 150) & (area[..., 0] < 100)
+    n, labels = cv2.connectedComponents(red.astype(np.uint8))
+    return [labels == i for i in range(1, n)]
+
+
+def test_one_crop_per_brick(monkeypatch):
+    monkeypatch.setattr(
+        bricks, "brick_masks", lambda area, model=None: _red_pixels(area)
+    )
+    crops = bricks_on_sheet(_fake_sheet())
     assert len(crops) == 2
     for crop in crops:
         assert crop.image.shape[:2] == crop.mask.shape and crop.mask.any()
@@ -15,7 +28,7 @@ def test_threshold_method_gives_one_crop_per_brick():
 
 def test_a_photo_without_markers_is_refused():
     with pytest.raises(ValueError):
-        bricks_on_sheet(np.full((300, 300, 3), 255, np.uint8), method="threshold")
+        bricks_on_sheet(np.full((300, 300, 3), 255, np.uint8))
 
 
 def test_a_piece_inside_a_surer_brick_is_dropped():

@@ -10,7 +10,7 @@ Versioned are `data/splits/`, `data/labels/` and `data/reference/`.
 data/
 ├── raw/
 │   ├── own_photos/     our own photos of the capture sheet (Kaggle, section 2)
-│   ├── own_crops/      single-brick crops of them, checked by hand (eval_own.py)
+│   ├── own_crops/      hand-checked crops of 2026-11-16, no longer used (2a)
 │   ├── own_single_photos/  our photos of single bricks, not on the sheet (2a)
 │   ├── internet/       photos and renders from TU Gdańsk: training data (2b)
 │   ├── own_renders/    our renders from LDraw: training data (2d)
@@ -71,15 +71,13 @@ a version.
 3. on kaggle.com: dataset → Settings → Sharing → add the team's Kaggle
    usernames
 
-## 2a. Crops of our photos (evaluation)
+## 2a. Older crops and single-brick photos (not used)
 
-`data/raw/own_crops/<part folder>/IMG_3415_b01.png`: one crop per brick, cut
-from the sheet photos on 2026-11-16 with the first `find_bricks` (one border
-colour), then checked by hand: bad crops were deleted. `labels.csv` lists all
-crops that were first cut; a crop listed there but missing in its folder was
-thrown away. The `.jpg` files are whole photos cropped by hand.
-`scripts/eval_own.py` uses this folder to test shape models on our own photos.
-This hand check cannot be redone, so keep the folder as it is.
+`data/raw/own_crops/`: crops of the sheet photos, cut on 2026-11-16 with the
+first colour-threshold finder and checked by hand. No longer used: since
+2026-11-21 `scripts/eval_own.py` evaluates the whole pipeline on the test
+sheet photos instead. The older results on these crops can be reproduced with
+the Git tag `v1-legacy`; keep the folder for that.
 
 `data/raw/own_single_photos/<part folder>/`: photos of a single brick taken
 without the capture sheet (so far 14 of 4073). Not used by any script yet;
@@ -134,14 +132,17 @@ In both, the column `original` is the path relative to `own_photos/`
 YOLO-seg finds the bricks (one class "brick", see
 `legorec.segment.yolo`):
 
-1. `python scripts/export_yolo.py`: warps every photo, draws the brick
-   outlines with `find_bricks` and writes a YOLO data set to
-   `processed/yolo_bricks/`, plus `review.csv` (photos to check first).
+1. `python scripts/export_yolo.py`: warps every photo and writes a YOLO data
+   set to `processed/yolo_bricks/`. The outlines are the corrected labels
+   (step 3) or, where there are none, drafts of the current YOLO model.
+   `review.csv` lists the photos to check first: every uncorrected val / test
+   photo, because a new YOLO model is measured on those (against a draft of
+   the old model, its mAP says little), then photos with suspicious outlines.
 2. `python scripts/show_labels.py`: draws the labels onto the photos.
 3. Wrong outlines: `python scripts/cvat_labels.py pack`, correct them in
    CVAT, `python scripts/cvat_labels.py unpack <export.zip>`. The corrected
    labels go to `data/labels/sheets/<photo>.txt` (**commit them**);
-   `export_yolo.py` uses them instead of the automatic ones.
+   `export_yolo.py` uses them instead of the drafts.
 4. `yolo segment train data=data/processed/yolo_bricks/data.yaml
    model=yolo26n-seg.yaml imgsz=1024` (needs `pip install -e .[detect]`).
 5. Copy `runs/segment/train/weights/best.pt` to `models/bricks_yolo.pt`.
