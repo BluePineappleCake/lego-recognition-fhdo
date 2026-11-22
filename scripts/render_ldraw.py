@@ -35,8 +35,8 @@ Output, same naming scheme as the internet renders:
 
     <out>/<folder>/<part>_<colour>_<view>_<id>.jpeg
 
-All views of one pose share the id prefix (id = pose id + view), so a split by
-pose keeps them together. <out>/renders_manifest.csv lists every image with
+All views of one pose share the id (the pose id), so a split by pose keeps
+them together. <out>/renders_manifest.csv lists every image with
 its part, colour, pose and seed.
 
 Colours: the colour names of the internet renders (LEGO names), looked up in
@@ -589,10 +589,8 @@ def main():
     for name in OPAQUE_COLOURS + TRANS_COLOURS:
         colour_value(colours, name)  # fail early on an unknown colour
 
-    if not 1 <= args.views <= 10:
-        raise ValueError(
-            "--views must be 1..10 (the views of a pose share an id range of 10)"
-        )
+    if args.views < 1:
+        raise ValueError("--views must be at least 1")
     # absolute: Blender resolves a relative render path against the drive root,
     # not against the current folder
     out = Path(args.out).resolve()
@@ -683,7 +681,8 @@ def render_part(
                 azimuth + math.radians(view * rng.uniform(5, 12)),
             )
             set_crop(scene, camera, obj, rng.uniform(0.04, 0.15))
-            name = f"{part}_{colour}_{view}_{pose_id + view}.jpeg"
+            # the same id for every view: data.renders groups the split by it
+            name = f"{part}_{colour}_{view}_{pose_id}.jpeg"
             scene.render.filepath = str(folder / name)
             bpy.ops.render.render(write_still=True)
             writer.writerow(
