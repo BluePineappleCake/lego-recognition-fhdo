@@ -156,8 +156,10 @@ shows the folder layout and how to download everything.
   Which folders and how to name them: [`data/README.md`](data/README.md),
   sections 2b and 2d.
 - **Our own photos (evaluation):** sheet photos in a private Kaggle dataset.
-  They are used for training only for parts without internet data (at the
-  moment 4073, `own_photo_parts`).
+  The shape model trains on them only for parts without internet data (at
+  the moment 4073, `own_photo_parts`). YOLO trains on their train split and
+  picks its best epoch on val; the size table is measured on train. Only
+  their test split is unseen.
 - **Splits:** the files `data/splits/*.csv` say which image belongs to train,
   val or test. They are in Git, so everyone uses exactly the same split.
   - Never regenerate a split file: results can only be compared on the same
