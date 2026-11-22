@@ -188,18 +188,17 @@ Commit the file afterwards.
 `test` (70 / 15 / 15 %, stratified per part folder). It is split by photo,
 not by session: most parts were photographed in only one session, and for
 finding bricks (one class) the part does not matter. New photos are added to
-it like new renders. Never regenerate it.
+it like new renders (this changes with
+[#61](https://github.com/BluePineappleCake/lego-recognition-fhdo/issues/61):
+update this sentence then). Never regenerate it.
 **Careful with the shape classifier**: a split by photo lets the model learn
 the session (background, light) instead of the part. `own_photo_parts` in a
 training config does exactly that for parts without internet data (4073):
 on those parts, the numbers of `eval_own.py` are too optimistic.
 
-`data/splits/finetune.csv` and `data/splits/test.csv` list photo paths.
-
-- Splits are made **by session**, never by single photo. Photos from the
-  same session (same bricks, same light) must not end up in both splits.
-- `test.csv` is frozen once created. Never train, fine-tune or tune
-  thresholds on it. Changes only after a team decision in `#decisions`.
+No frozen test set yet: a new photo session, split by session, will become
+`data/splits/test.csv`. Never train or tune on it; changes only after a team
+decision in `#decisions`.
 
 ## Paths in code
 
