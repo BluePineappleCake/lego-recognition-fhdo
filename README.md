@@ -19,7 +19,7 @@ explained in the [Glossary](#glossary).
 [Get the data](#get-the-data) ·
 [Train the shape classifier](#train-the-shape-classifier) ·
 [Find and name the bricks on a sheet photo](#find-and-name-the-bricks-on-a-sheet-photo) ·
-[Use the shape model in code](#use-the-shape-model-in-code) ·
+[Use the pipeline in code](#use-the-pipeline-in-code) ·
 [Code tour](#code-tour) ·
 [Working together](#working-together) ·
 [Glossary](#glossary)
@@ -43,10 +43,15 @@ Why a grey card? Its colour is a known neutral grey. That lets us correct the
 colours of every photo (white balance) before we decide which LEGO colour a
 brick has.
 
-**Core experiment:** we train on *renders* (computer-generated images), but in
-the end the tool has to work on real photos. How much accuracy do we lose
-between renders and real photos (the *render-to-real gap*), and how do we win
-it back?
+**Core experiment:** the tool has to work on our own sheet photos, but almost
+all training images are not ours: internet photos and renders. How much
+accuracy do we lose between the training images and our photos (the
+*render-to-real gap*), and how do we win it back? At first (Kaggle renders
+only) the gap was between renders and real photos. Since 2026-11-21 the
+larger gap is between the internet photos and our photos: the team's model
+gets about 95 % top-1 on internet photos (val) but about 67 % on our test
+photos without the size prior (84 % with it), see the
+[experiment log](docs/experiments.md), 2026-11-21.
 
 ## Where we are
 
@@ -150,14 +155,17 @@ shows the folder layout and how to download everything.
   into `data/raw/internet/`, and our own renders into `data/raw/own_renders/`.
   Which folders and how to name them: [`data/README.md`](data/README.md),
   sections 2b and 2d.
-- **Real photos (fine-tuning and test):** our own photos, in a private Kaggle
-  dataset.
+- **Our own photos (evaluation):** sheet photos in a private Kaggle dataset.
+  They are used for training only for parts without internet data (at the
+  moment 4073, `own_photo_parts`).
 - **Splits:** the files `data/splits/*.csv` say which image belongs to train,
   val or test. They are in Git, so everyone uses exactly the same split.
   - Never regenerate a split file: results can only be compared on the same
     split.
-  - The test split of our real photos is frozen: never train or tune anything
-    on it.
+  - Never train or tune anything on the test split of our sheet photos
+    (`data/splits/sheets.csv`): decisions are made on val. It is **not a
+    frozen test set yet**: its photos come from the same photo sessions as
+    train and val. A new session as a frozen test is the next step.
 
 ## Train the shape classifier
 
@@ -415,7 +423,7 @@ All files, by pipeline step:
 | Rule | Why |
 |---|---|
 | One change per experiment | Otherwise we cannot tell which change caused the effect. |
-| Compare over several seeds, not single runs | Runs with the same settings differ by up to ~1 pp top-1 (see the [log](docs/experiments.md)). One lucky run can fool us. |
+| Compare over several seeds, not single runs | Runs with the same settings differ by up to ~2.4 pp top-1 on our test photos (83.6–86.0 %, 3 seeds of `shape_internet_own` with the size prior; see the [log](docs/experiments.md), 2026-11-21). One lucky run can fool us. |
 | Never train or tune on the real-photo test set | The test set must stay unseen until the end. Otherwise our final number is too optimistic. |
 
 ## Glossary
@@ -424,12 +432,12 @@ All files, by pipeline step:
 |---|---|
 | Render | A computer-generated image of a 3D LEGO model. Training data: the internet set and our own LDraw renders. |
 | Real photo | A photo of real bricks that we take ourselves. The tool has to work on these in the end. |
-| Render-to-real gap | How much accuracy a model loses when it is trained on renders and used on real photos. Measuring and closing it is our core experiment. |
+| Render-to-real gap | How much accuracy a model loses between the images it is trained on (renders, internet photos) and our own photos. Measuring and closing it is our core experiment. |
 | Part number | LEGO's number for a part shape, e.g. 3001 = brick 2×4. These are our classes. |
 | Pose | One orientation of a brick in the renders. The same pose comes in several colours, so there are several almost identical images of it. |
 | Group | Images that must stay in one split: the colours of one render pose, the cameras of one internet capture, the bricks of one sheet photo. Otherwise a near-copy of a training image would end up in the test set, and the test would be too easy. |
 | Train / val / test | *Train*: the model learns from it. *Val*: we use it to choose (best epoch, settings). *Test*: only for the final number. |
-| Frozen test set | A test set that never changes and is never used for decisions. |
+| Frozen test set | A test set that never changes and is never used for decisions. We do not have one yet: the test split of `sheets.csv` comes from the same sessions as train and val. |
 | Crop | The cut-out of one brick, scaled to 96 × 96 grey pixels. This is what the CNN sees. |
 | Baseline | The team's config (`configs/shape_internet_own.yaml`). Every variant is compared against it. |
 | Top-1 / top-3 accuracy | Share of images where the right part is the model's first guess / among its three best guesses. |
