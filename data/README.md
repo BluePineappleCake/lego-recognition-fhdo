@@ -10,7 +10,6 @@ Versioned are `data/splits/`, `data/labels/` and `data/reference/`.
 data/
 ├── raw/
 │   ├── own_photos/     our own photos of the capture sheet (Kaggle, section 2)
-│   ├── own_crops/      hand-checked crops of 2026-11-16, no longer used (2a)
 │   ├── own_single_photos/  our photos of single bricks, not on the sheet (2a)
 │   ├── internet/       photos and renders from TU Gdańsk: training data (2b)
 │   ├── own_renders/    our renders from LDraw: training data (2d)
@@ -77,7 +76,7 @@ a version.
 first colour-threshold finder and checked by hand. No longer used: since
 2026-11-21 `scripts/eval_own.py` evaluates the whole pipeline on the test
 sheet photos instead. The older results on these crops can be reproduced with
-the Git tag `v1-legacy`; keep the folder for that.
+the Git tag `v1-legacy`; the folder is no longer in the repo.
 
 `data/raw/own_single_photos/<part folder>/`: photos of a single brick taken
 without the capture sheet (so far 14 of 4073). Not used by any script yet;
