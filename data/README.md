@@ -31,7 +31,7 @@ The first models were trained on the Kaggle set
 `data/splits/renders.csv` and the old configs are in the Git tag `v1-legacy`.
 The folder `data/raw/renders/` can be deleted.
 
-## 2. Our photos (fine-tuning and test)
+## 2. Our photos (evaluation)
 
 One folder per part, e.g. `3001 brick 2x4/IMG_3415.jpg` (details in 2c).
 Shared as the **private Kaggle dataset `gonsterenjoyer/lego-sheet-photos`**:
