@@ -113,7 +113,15 @@ def write_review(out: Path, review: list[list]) -> None:
 
 
 def empty_export(out: Path) -> None:
-    """A fresh folder: never mix a new export with files of an old one."""
+    """A fresh folder: never mix a new export with files of an old one.
+
+    Only an old export (it has data.yaml) is deleted: a wrong --out such as
+    data/ must never delete the raw photos.
+    """
+    if out.exists() and any(out.iterdir()) and not (out / "data.yaml").exists():
+        raise SystemExit(
+            f"{out} is not an old export (no data.yaml): pick another --out"
+        )
     if out.exists():
         shutil.rmtree(out)
     for kind in ("images", "labels"):
@@ -146,6 +154,7 @@ def main():
     split_of_group = {p.group: s for s, ps in split_of.items() for p in ps}
     out, fixed_dir = Path(args.out), Path(args.fixed)
     empty_export(out)
+    write_data_yaml(out)  # first: an export that stops halfway can still be replaced
 
     review, skipped, counts = [], [], defaultdict(lambda: [0, 0])
     n_fixed, unverified = 0, defaultdict(int)  # eval split -> uncorrected photos
@@ -186,7 +195,6 @@ def main():
                  numbers(edge)]
             )  # fmt: skip
 
-    write_data_yaml(out)
     write_review(out, review)
 
     print(f"[split] {fingerprint}")

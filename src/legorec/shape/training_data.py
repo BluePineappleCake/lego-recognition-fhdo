@@ -80,6 +80,7 @@ def _preprocess_cached(items_per_split, prefix, split_hash, config) -> SourceDat
 
     Every setting that changes the preprocessed images must be part of the
     cache file name, otherwise an old cache would be reused without warning.
+    So are the image files themselves (_files_id).
     The cache holds all parts of the source; the model's classes are picked
     later (load_training_data), so one cache serves every class list.
     """
@@ -91,11 +92,24 @@ def _preprocess_cached(items_per_split, prefix, split_hash, config) -> SourceDat
     splits, names = {}, {}
     for split in ("train", "val", "test"):
         items = items_per_split.get(split, [])
-        cache_file = processed_dir() / f"{prefix}_{split}_{cache_tag}.npz"
+        cache_file = (
+            processed_dir() / f"{prefix}_{split}_{_files_id(items)}_{cache_tag}.npz"
+        )
         x = _build_cache(items, config.size, cache_file)
         splits[split] = (x, [item.part for item in items])
         names |= {item.part: item.name for item in items}
     return SourceData(splits, names, split_hash)
+
+
+def _files_id(items) -> str:
+    """Fingerprint of the image files of one split: a deleted, added or
+    re-rendered image gives a new cache name. File name and time of change
+    only, so moving the data folder does not rebuild the cache."""
+    text = "\n".join(
+        f"{item.part}/{Path(item.path).name} {Path(item.path).stat().st_mtime_ns}"
+        for item in items
+    )
+    return hashlib.md5(text.encode()).hexdigest()[:8]
 
 
 def _build_cache(items, size: int, cache_file, chunk: int = 512) -> np.ndarray:
