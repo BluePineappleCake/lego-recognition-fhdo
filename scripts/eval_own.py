@@ -22,7 +22,8 @@ per photo:
 
     top1 / top3 / mF1 / conf   per crop, all parts of the model, as for the renders
     top1_k        best guess among the k parts that occur in these crops only
-    photo_top1    one answer per photo: mean probability over its crops
+    photo_top1    one answer per photo: mean probability over its crops; a
+                  photo where YOLO finds no brick counts as wrong
 
 Models are grouped into variants by the tags of their config; the table
 shows mean and range over the seeds of a variant. Then per part and per
@@ -80,7 +81,8 @@ def variant_and_seed(checkpoint: Path) -> tuple[str, int]:
 def sheet_bricks(split, known):
     """Cut the sheet photos of `split` with bricks_on_sheet.
 
-    Returns (Bricks, their BrickCrops, skipped folder names).
+    Returns (Bricks, their BrickCrops, skipped folder names, photos where YOLO
+    found no brick).
     """
     import cv2
 
@@ -122,16 +124,19 @@ def sheet_bricks(split, known):
     if no_markers:
         print(f"[warn] markers not found, photo left out: {', '.join(no_markers)}")
     if empty:
-        print(f"[warn] no brick found (counts as nothing): {', '.join(empty)}")
+        print(f"[warn] no brick found (wrong in photo_top1): {', '.join(empty)}")
     if split != "test":
         print(
             "[warn] YOLO was trained on train / val photos: finding is too easy there"
         )
-    return bricks, crops, skipped
+    return bricks, crops, skipped, empty
 
 
-def evaluate(checkpoint, bricks, crops, device, size_prior=None) -> dict:
-    """One model on the bricks: metrics and what it answered for every brick."""
+def evaluate(checkpoint, bricks, crops, device, size_prior=None, empty=()) -> dict:
+    """One model on the bricks: metrics and what it answered for every brick.
+
+    empty: photos where YOLO found no brick; wrong in photo_top1.
+    """
     classifier = ShapeClassifier(checkpoint, device=device, size_prior=size_prior)
     parts = classifier.parts
     y = np.array([parts.index(brick.part) for brick in bricks])
@@ -139,6 +144,7 @@ def evaluate(checkpoint, bricks, crops, device, size_prior=None) -> dict:
     m = classification_metrics(scores, y)
     m["top1_k"] = top1_among(scores, y, sorted(set(y)))
     photo_right = group_top1(scores, y, [brick.group for brick in bricks])
+    photo_right |= dict.fromkeys(empty, False)  # the pipeline named nothing there
     m["photo_top1"] = float(np.mean(list(photo_right.values())))
     variant, seed = variant_and_seed(checkpoint)
     return {
@@ -289,7 +295,9 @@ def main():
         args.models or sorted(MODELS_DIR.glob("shape_*.pt"))  # shape.pt: a copy
     )
 
-    bricks, crops, skipped = sheet_bricks(args.split, parts_known_by_all(checkpoints))
+    bricks, crops, skipped, empty = sheet_bricks(
+        args.split, parts_known_by_all(checkpoints)
+    )
     if not bricks:
         raise SystemExit("no bricks of a part that every model knows")
     print(
@@ -306,7 +314,7 @@ def main():
     results = {}  # run id -> result of evaluate()
     for checkpoint in checkpoints:
         run = checkpoint.stem.removeprefix("shape_")
-        results[run] = evaluate(checkpoint, bricks, crops, device, size_prior)
+        results[run] = evaluate(checkpoint, bricks, crops, device, size_prior, empty)
         out = processed_dir() / f"{prefix}_{args.split}_{run}.csv"
         write_predictions(out, bricks, results[run])
 
