@@ -189,3 +189,23 @@ def test_classes_come_from_the_training_sources(tmp_path, monkeypatch):
     assert n == 20 and set(data.sources["own_renders"]["train"][1]) == {2}
     assert (tmp_path / "own_renders.csv").exists()
     assert list((tmp_path / "cache").glob("own_renders_train_*_yolotest.npz"))
+
+
+def test_deleting_a_render_builds_a_new_cache(tmp_path, monkeypatch):
+    from legorec.data import renders
+    from legorec.shape.training_data import load_source
+
+    _no_yolo(monkeypatch)
+    monkeypatch.setenv("LEGOREC_PROCESSED", str(tmp_path / "cache"))
+    monkeypatch.setattr(renders, "SPLIT_FILES", {"own_renders": tmp_path / "own.csv"})
+    own = tmp_path / "own"
+    _write_renders(own, [f"3001 brick 2x4/3001_Red_0_{i}.jpeg" for i in range(20)])
+    config = TrainConfig(train_on=["own_renders"])
+    load_source("own_renders", config, own)
+
+    # the split file still lists it: only the file list tells the caches apart
+    next((own / "3001 brick 2x4").iterdir()).unlink()
+    data = load_source("own_renders", config, own)
+
+    assert all(len(x) == len(parts) for x, parts in data.splits.values())
+    assert sum(len(parts) for _, parts in data.splits.values()) == 19
