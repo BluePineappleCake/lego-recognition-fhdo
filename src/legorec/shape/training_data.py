@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -136,7 +137,11 @@ def _build_cache(items, size: int, cache_file, chunk: int = 512) -> np.ndarray:
 
     x = np.stack(arrays) if arrays else np.zeros((0, size, size), np.uint8)
     cache_file.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(cache_file, x=x)
+    # write under another name first: a run stopped while saving must not leave
+    # a broken file under the real name, which every later run would load
+    tmp = cache_file.with_suffix(".tmp.npz")
+    np.savez(tmp, x=x)
+    os.replace(tmp, cache_file)
     return x
 
 
