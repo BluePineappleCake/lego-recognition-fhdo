@@ -113,3 +113,30 @@ def test_size_prior_prefers_the_part_of_the_right_size(tmp_path):
     assert ll[0, 0] > ll[0, 1] and ll[1, 1] > ll[1, 0]
     # unknown part: between a fitting and a not fitting size
     assert ll[0, 0] > ll[0, 2] > ll[0, 1] and ll[1, 1] > ll[1, 2] > ll[1, 0]
+
+
+def test_size_prior_skips_parts_without_bricks():
+    # a part whose train photos gave no brick must not get a row: an empty
+    # row is NaN, and one NaN column made every answer that part
+    from legorec.shape.size_prior import SizePrior
+
+    prior = SizePrior.fit(
+        {"3001": [(32.0, 16.0), (31.5, 15.8)], "3003": [(16.0, 16.0)], "4073": []}
+    )
+    assert set(prior.sizes) == {"3001", "3003"}
+
+    out = prior.log_likelihood(
+        [_rectangle_crop(20, 10)], ["3001", "3003", "4073", "3622"]
+    )
+    assert np.all(np.isfinite(out))  # also the parts without a row
+
+
+def test_size_prior_refuses_a_table_with_nan(tmp_path):
+    from legorec.shape.size_prior import SizePrior
+
+    table = tmp_path / "part_sizes.csv"
+    SizePrior.fit({"3001": [(32.0, 16.0)]}).save(table)
+    with open(table, "a", encoding="utf-8") as file:
+        file.write("4073,0,nan,nan,nan,nan,nan,nan\n")
+    with pytest.raises(ValueError, match="4073"):
+        SizePrior.load(table)

@@ -44,6 +44,8 @@ def main():
         part: [np.array(dimensions_px(crop)) / PX_PER_MM for crop in crops]
         for part, crops in train_sheet_crops().items()
     }
+    for part in sorted(part for part, dims in mm.items() if not dims):
+        print(f"[skip] {part}: no brick found on its train photos, no row")
     prior = SizePrior.fit(mm)
     prior.save()
     print(f"{'part':8}{'n':>5}{'long':>8}{'short':>8}   sd long / short")

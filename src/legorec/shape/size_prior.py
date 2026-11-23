@@ -70,9 +70,16 @@ class SizePrior:
 
     @classmethod
     def fit(cls, dimensions_mm_per_part: dict[str, list]) -> "SizePrior":
-        """{part: [(long, short) in mm, ...]} -> SizePrior."""
+        """{part: [(long, short) in mm, ...]} -> SizePrior.
+
+        A part without any measured brick gets no row (it then uses the size
+        of all parts, see log_likelihood). An empty row would be NaN, and one
+        NaN column makes every answer NaN.
+        """
         sizes = {}
         for part, dims in sorted(dimensions_mm_per_part.items()):
+            if len(dims) == 0:
+                continue
             logs = np.log(np.asarray(dims, dtype=np.float64).reshape(-1, 2))
             long_mm, long_sd = _median_and_sd(logs[:, 0])
             short_mm, short_sd = _median_and_sd(logs[:, 1])
@@ -88,6 +95,12 @@ class SizePrior:
             row["part"]: (*(float(row[c]) for c in columns), int(row["n"]))
             for row in rows
         }
+        broken = [part for part, row in sizes.items() if not np.all(np.isfinite(row))]
+        if broken:
+            raise ValueError(
+                f"{path}: no valid size for {broken}. Rebuild the table with "
+                "scripts/size_check.py"
+            )
         return cls(sizes, path=Path(path))
 
     def save(self, path=TABLE) -> None:
